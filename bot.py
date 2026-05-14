@@ -243,6 +243,17 @@ def main():
     logger.info("🌿 Дух Леса взирает на мир... Запущен!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
+import threading, http.server, os
+
+class HealthHandler(http.server.BaseHTTPRequestHandler):ren class HealthHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is alive")
+
+threading.Thread(target=lambda: http.server.HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 10000))), HealthHandler).serve_forever(), daemon=True).start()
+
 if __name__=="__main__":
     main()
 
