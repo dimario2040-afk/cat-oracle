@@ -6,9 +6,12 @@
     startCommand: python bot.py
     runtime: python
     pythonVersion: 3.12.0
+    runtime: python
+    pythonVersion: 3.12.0
     envVars:
       - key: 8827616686:AAFwdGgz5dkKEe_VbXvfHHecZk3Se0oOPek
         sync: false
       - key: 316151942
         sync: false
+
 
