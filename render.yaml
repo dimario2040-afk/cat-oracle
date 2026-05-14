@@ -1,11 +1,14 @@
-services:
+﻿services:
   - type: web
     name: cat-oracle
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
+    runtime: python
+    pythonVersion: 3.12.0
     envVars:
-      - key: BOT_TOKEN
+      - key: 8827616686:AAFwdGgz5dkKEe_VbXvfHHecZk3Se0oOPek
         sync: false
-      - key: ADMIN_ID
+      - key: 316151942
         sync: false
+
