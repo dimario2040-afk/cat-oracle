@@ -1,5 +1,5 @@
-python-telegram-bot>=20.7
-librosa>=0.10.0
-numpy>=1.24
-Pillow>=10.0
-soundfile>=0.12
+﻿python-telegram-bot>=20.7,<21
+librosa>=0.10.0,<1
+numpy>=1.24,<2
+Pillow>=10.0,<11
+soundfile>=0.12,<1

@@ -9,24 +9,22 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-try:
-    from config import BOT_TOKEN, ADMIN_ID
-except:
-    BOT_TOKEN = "8827616686:AAFwdGgz5dkKEe_VbXvfHHecZk3Se0oOPek"
-    ADMIN_ID = 123456789
+import os
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8827616686:AAFwdGgz5dkKEe_VbXvfHHecZk3Se0oOPek")
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
 
-BOT_USERNAME = "Catgift_bot"
+BOT_USERNAME = "Catgift_bot"  
 
 CATS = [
     (1,"Дух Света","Светозарный Кот","Твой голос прорезает тьму, как первый луч рассвета.","свет","✨",0,0.3,0,400),
     (2,"Хранитель Теней","Кот-Тень","Ты крадёшься в темноте и шепчешь древние тайны.","тьма","🌑",0.3,1.0,50,200),
-    (3,"Буревестник","Кот-Штормогром","Твой рёв сотрясает небеса!","буря","⚡",0.5,1.0,50,150),
-    (4,"Шёпот Луны","Лунный Кот","Твой тихий голос — шёпот самой луны.","луна","🌙",0,0.15,200,800),
+    (3,"Буревестник","Кот-Штормогром","Твой рёв сотрясает небеса! Даже духи трепещут.","буря","⚡",0.5,1.0,50,150),
+    (4,"Шёпот Луны","Лунный Кот","Твой тихий голос — шёпот самой луны, манящий звёзды.","луна","🌙",0,0.15,200,800),
     (5,"Пепельный Странник","Кот-Странник","Твой прерывистый голос эхом разносится меж миров.","пепел","🌫",0,0.5,150,400),
-    (6,"Кристальный Звон","Кот-Хрусталь","Высокий чистый звон разбивает тишину на осколки.","кристалл","💎",0.05,0.3,400,800),
+    (6,"Кристальный Звон","Кот-Хрусталь","Высокий чистый звон твоего голоса разбивает тишину на осколки.","кристалл","💎",0.05,0.3,400,800),
     (7,"Тлеющий Уголь","Кот-Огонёк","Ты тихо мурлычешь, но внутри — жар древнего вулкана.","огонь","🔥",0.05,0.2,80,250),
     (8,"Ледяной Ветер","Кот-Вьюга","Твой голос — ледяной сквозняк из забытых пещер.","лёд","❄️",0,0.25,100,300),
-    (9,"Корень Мира","Кот-Древо","Глубокий гул корней, уходящих в сердце земли.","земля","🌳",0.2,0.6,50,150),
+    (9,"Корень Мира","Кот-Древо","Твой голос — глубокий гул корней, уходящих в самое сердце земли.","земля","🌳",0.2,0.6,50,150),
     (10,"Искра","Кот-Искра","Твой голос — искра, зажжённая в сердце леса.","свет","✨",0,0.2,200,600),
     (11,"Сумерки","Кот-Сумерки","Ты стоишь на грани дня и ночи.","сумерки","🌆",0.1,0.4,100,350),
     (12,"Мшистый","Мшистый Кот","Твой мурлыкающий голос — как мох на древних камнях.","земля","🪨",0.2,0.5,50,200),
@@ -34,12 +32,12 @@ CATS = [
     (14,"Вулкан","Кот-Вулкан","Твой рёв — извержение из недр земли!","огонь","🌋",0.6,1.0,30,120),
     (15,"Зефир","Кот-Зефир","Ты лёгкий, как облачко в летнем небе.","воздух","☁️",0,0.2,200,500),
     (16,"Гроза","Кот-Гроза","Твой голос гремит как раскаты грома.","буря","🌩",0.5,1.0,40,180),
-    (17,"Тишина","Кот-Тишина","Ты молчалив, но твоё мяу — оглушительно.","тишина","🤫",0,0.1,0,100),
+    (17,"Тишина","Кот-Тишина","Ты молчалив, но твоё мяу — оглушительно в тишине.","тишина","🤫",0,0.1,0,100),
     (18,"Эхо","Кот-Эхо","Твой голос отражается в вечности.","эфир","🔊",0.1,0.5,150,450),
     (19,"Звезда","Звёздный Кот","Ты мяукаешь в такт пульсару вселенной.","космос","🌟",0,0.2,400,800),
     (20,"Папоротник","Кот-Папоротник","Ты — дикий и прекрасный, как лесная чаща.","природа","🌿",0.1,0.4,100,300),
     (21,"Ручей","Кот-Ручей","Твой голос журчит, как горный ручей весной.","вода","🏔",0,0.2,250,600),
-    (22,"Туман","Туманный Кот","Ты таинственен, как лес в предрассветном тумане.","туман","🌁",0,0.3,50,250),
+    (22,"Туман","Туманный Кот","Ты — таинственен, как лес в предрассветном тумане.","туман","🌁",0,0.3,50,250),
     (23,"Глина","Кот-Глина","Твой мяу — мягкий и податливый, как сырая глина.","земля","🏺",0.1,0.3,80,220),
     (24,"Молния","Кот-Молния","Твой крик разрезает небо пополам!","буря","⚡",0.4,1.0,200,600),
     (25,"Мрак","Кот-Мрак","Из глубины твоего голоса выползает древний мрак.","тьма","🖤",0.3,0.8,30,120),
@@ -102,19 +100,20 @@ def classify_cat(rms, f0):
 def analyze_audio_bytes(ogg_bytes):
     tmp = tempfile.gettempdir()
     ogg_path = os.path.join(tmp, "cv.ogg")
-    with open(ogg_path, "wb") as f:
-        f.write(ogg_bytes)
-    try:
-        y, sr = librosa.load(ogg_path, sr=22050, duration=5.0)
+    with open(ogg_path, "wb") as f: f.write(ogg_bytes)
+    try: y, sr = librosa.load(ogg_path, sr=22050, duration=5.0)
     finally:
-        if os.path.exists(ogg_path):
-            os.remove(ogg_path)
+        if os.path.exists(ogg_path): os.remove(ogg_path)
     rms = float(np.abs(y).mean())
     f0, v, _ = librosa.pyin(y, fmin=50, fmax=800, sr=sr)
     return rms, float(np.nanmean(f0[v])) if v.any() else 200.0
 
 BG = [(20,15,40),(25,15,30),(40,25,10),(10,30,25),(35,10,20),(15,15,15)]
-EC = {"свет":(255,255,200),"тьма":(150,130,200),"огонь":(255,180,80),"вода":(100,200,255),"земля":(180,160,100),"воздух":(200,230,255),"буря":(200,180,255),"луна":(200,220,255),"лёд":(200,240,255),"туман":(180,180,200),"эфир":(220,200,255),"природа":(180,230,150),"космос":(150,150,255),"тишина":(200,200,210),"пепел":(180,170,160),"сумерки":(160,140,180),"кристалл":(200,220,255)}
+EC = {"свет":(255,255,200),"тьма":(150,130,200),"огонь":(255,180,80),"вода":(100,200,255),
+      "земля":(180,160,100),"воздух":(200,230,255),"буря":(200,180,255),"луна":(200,220,255),
+      "лёд":(200,240,255),"туман":(180,180,200),"эфир":(220,200,255),"природа":(180,230,150),
+      "космос":(150,150,255),"тишина":(200,200,210),"пепел":(180,170,160),"сумерки":(160,140,180),
+      "кристалл":(200,220,255)}
 SYMS = ["◇","○","△","☯","⟡","✧","∞","⚘","☽","𓋹","⟐","✳"]
 
 def gen_card(cat):
@@ -123,9 +122,13 @@ def gen_card(cat):
     for _ in range(30):
         x,y,r=random.randint(0,W),random.randint(0,H),random.randint(15,80)
         d.ellipse([x-r,y-r,x+r,y+r],fill=(255,255,255,random.randint(5,25)))
+    for _ in range(20):
+        x,y,r=random.randint(0,W),random.randint(0,H),random.randint(2,6)
+        c=random.choice([(240,230,200),(200,220,255),(200,255,220),(255,200,220),(220,200,255),(255,220,180)])
+        d.ellipse([x-r,y-r,x+r,y+r],fill=(c[0],c[1],c[2],random.randint(30,80)))
     ec=EC.get(cat["element"],(200,200,200))
     try:
-        fp=os.path.join(os.path.dirname(__file__),"assets","font.ttf")
+        fp=os.path.join(os.path.dirname(__file__),"font.ttf")
         ft=ImageFont.truetype(fp,44);fn=ImageFont.truetype(fp,32);fd=ImageFont.truetype(fp,22);fs=ImageFont.truetype(fp,18)
     except:
         ft=fn=fd=fs=ImageFont.load_default()
@@ -138,65 +141,95 @@ def gen_card(cat):
     t=f"🌀 СТИХИЯ: {cat['element'].upper()}";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,350),t,font=fs,fill=ec+(180,))
     s=random.choice(SYMS);bb=d.textbbox((0,0),s,font=fn);d.text(((W-(bb[2]-bb[0]))//2,420),s,font=fn,fill=ec+(60,))
     t="🐾 Дух Леса указал на тебя 🐾";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,520),t,font=fs,fill=(255,255,255,150))
-    t=f"t.me/{BOT_USERNAME}";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,570),t,font=fs,fill=(180,180,255,120))
+    t="t.me/Catgift_bot";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,570),t,font=fs,fill=(180,180,255,120))
     t=f"✦ Тотем #{cat['id']} ✦";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,630),t,font=fs,fill=(150,150,180,90))
-    buf=io.BytesIO()
-    img.save(buf,format="PNG")
-    buf.seek(0)
-    return buf
+    buf=io.BytesIO();img.save(buf,format="PNG");return buf.getvalue()
 
-DB_PATH = os.path.join(os.path.dirname(__file__),"sanctuary.db")
+DB=os.path.join(os.path.dirname(__file__),"sanctuary.db")
 def init_db():
-    with sqlite3.connect(DB_PATH) as c:
+    with sqlite3.connect(DB) as c:
         c.execute("CREATE TABLE IF NOT EXISTS readings(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,cat_id INTEGER,cat_name TEXT,ts TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS stats(id INTEGER PRIMARY KEY AUTOINCREMENT,total INTEGER DEFAULT 0,users INTEGER DEFAULT 0)")
 def record_reading(uid,cid,cname):
-    with sqlite3.connect(DB_PATH) as c:
+    with sqlite3.connect(DB) as c:
         c.execute("INSERT INTO readings(user_id,cat_id,cat_name,ts) VALUES(?,?,?,?)",(uid,cid,cname,datetime.now().isoformat()))
         c.execute("UPDATE stats SET total=COALESCE(total,0)+1 WHERE id=1")
         if c.rowcount==0:c.execute("INSERT INTO stats(id,total,users) VALUES(1,1,0)")
         c.execute("SELECT COUNT(DISTINCT user_id) FROM readings");c.execute("UPDATE stats SET users=? WHERE id=1",(c.fetchone()[0],))
 
 async def start(u,c):
-    await u.message.reply_text(f"🌿 *Дух Леса приветствует тебя, {u.effective_user.first_name}...* 🌿\n\nТы стоишь на пороге *Зачарованного Леса*.\n🎤 *Нажми на микрофон* и издай звук как кот!\n\n🐾 *Готов?* Тогда мяу, странник... 🐾",parse_mode="Markdown")
+    await u.message.reply_text(
+        f"🌿 *Дух Леса приветствует тебя, {u.effective_user.first_name}...* 🌿\n\n"
+        "Ты стоишь на пороге *Зачарованного Леса*.\n"
+        "Духи слышат твои шаги. Они хотят услышать твой голос.\n\n"
+        "🎤 *Нажми на микрофон* и издай звук как кот:\n"
+        "— Мяу, мурлыкай, шипи, вой, рычи...\n\n"
+        "🐾 *Готов?* Тогда мяу, странник... 🐾",
+        parse_mode="Markdown"
+    )
 
 async def handle_voice(u,c):
     s=await u.message.reply_text("🌌 *Дух Леса внимает твоему зову...* 🌌",parse_mode="Markdown")
     try:
         vf=await u.message.voice.get_file();ob=await vf.download_as_bytearray()
-        await c.bot.edit_message_text("🎵 Эхо разносится...",chat_id=u.effective_chat.id,message_id=s.message_id)
+        await c.bot.edit_message_text("🎵 Эхо разносится по лесу...",chat_id=u.effective_chat.id,message_id=s.message_id)
         rms,f0=analyze_audio_bytes(ob);logger.info(f"User {u.effective_user.id}: rms={rms:.3f}, f0={f0:.1f}")
-        cat=classify_cat(rms,f0);logger.info(f"  → {cat['name']}")
+        cat=classify_cat(rms,f0);logger.info(f"  → Тотем: {cat['name']}")
         try:record_reading(u.effective_user.id,cat['id'],cat['name'])
         except:pass
         await c.bot.edit_message_text("🔮 Древние силы сплетают твою суть...",chat_id=u.effective_chat.id,message_id=s.message_id)
         img=gen_card(cat)
-        share_text = f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты?"
-        share_url = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text={urllib.parse.quote(share_text)}"
-        kb=[[InlineKeyboardButton("📢 Поделиться!",url=share_url)]]
+        share_text=f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/Catgift_bot"
+        share_url=f"https://t.me/share/url?url=https://t.me/Catgift_bot&text={urllib.parse.quote(share_text)}"
+        kb=[[InlineKeyboardButton("📢 Показать миру!",url=share_url)]]
         await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
-        await u.message.reply_photo(photo=img,caption=f"🌟 *{cat['title']}* 🌟\n\n{cat['emoji']} *{cat['name']}*\n_{cat['description']}_\n\n🌀 Стихия: {cat['element']}",parse_mode="Markdown",reply_markup=InlineKeyboardMarkup(kb))
+        await u.message.reply_photo(
+            photo=img,
+            caption=f"🌟 *{cat['title']}* 🌟\n\n{cat['emoji']} *{cat['name']}*\n_{cat['description']}_\n\n🌀 Стихия: {cat['element']}\n\n*Хочешь узнать свой тотем?* Отправь боту голосовое сообщение с кошачьим голосом! 🐾",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
     except Exception as e:
-        logger.error(f"ERR: {e}")
-        try:await c.bot.edit_message_text("🌫 *Туман сгущается...* Попробуй ещё раз! 🐱",chat_id=u.effective_chat.id,message_id=s.message_id,parse_mode="Markdown")
+        logger.error(f"Ошибка: {e}",exc_info=True)
+        try:await c.bot.edit_message_text("🌫 *Туман сгущается...* Попробуй ещё раз! 🐱\n\n_Подсказка: запиши голос подлиннее (3-5 секунд)_",chat_id=u.effective_chat.id,message_id=s.message_id,parse_mode="Markdown")
         except:await u.message.reply_text("🌫 *Туман...* Попробуй ещё раз! 🐱",parse_mode="Markdown")
 
 async def stats(u,c):
-    if u.effective_user.id!=ADMIN_ID:return await u.message.reply_text("❌ Только Хранитель Леса.")
-    with sqlite3.connect(DB_PATH) as conn:
+    if u.effective_user.id!=ADMIN_ID:return await u.message.reply_text("❌ Только Хранитель Леса может видеть это.")
+    with sqlite3.connect(DB) as conn:
         t=conn.execute("SELECT COUNT(*) FROM readings").fetchone()[0]
         us=conn.execute("SELECT COUNT(DISTINCT user_id) FROM readings").fetchone()[0]
         top=conn.execute("SELECT cat_name, COUNT(*) as cnt FROM readings GROUP BY cat_name ORDER BY cnt DESC LIMIT 5").fetchall()
     msg=f"🌿 *Статистика Святилища* 🌿\n\n🐱 Тотемов раскрыто: *{t}*\n🙏 Странников: *{us}*"
-    if top:msg+="\n\n*Топ-5:*\n"+("\n".join(f"  • {n}: {c}" for n,c in top))
+    if top:msg+="\n\n*Топ-5 тотемов:*\n"+("\n".join(f"  • {n}: {cnt}" for n,cnt in top))
     msg+="\n\n_Дух Леса доволен._"
     await u.message.reply_text(msg,parse_mode="Markdown")
 
 async def about(u,c):
-    await u.message.reply_text("🌲 *О Святилище Котов-Тотемов* 🌲\n\nИдея родилась из разговора двух путников:\n🎭 *Дмитрий* — хотел железную коробку с ИИ\n🧙 *Тимофей* — заметил тренд с птичьими голосовухами\n\nИ родилась *Кото-печенька* —\n70 кошек. 70 судеб. 70 тотемов.\n\n🐾 *Запиши свой голос — узнай кто ты* 🐾",parse_mode="Markdown")
+    await u.message.reply_text(
+        "🌲 *О Святилище Котов-Тотемов* 🌲\n\n"
+        "Идея родилась из разговора двух путников:\n"
+        "🎭 *Дмитрий* — хотел железную коробку с ИИ для кошек\n"
+        "🧙 *Тимофей* — заметил тренд с птичьими голосовухами\n\n"
+        "И родилась *Кото-печенька* —\n"
+        "бот, который слушает твой голос и находит\n"
+        "твоего древнего кошачьего духа-тотема.\n\n"
+        "70 кошек. 70 судеб. 70 тотемов.\n\n"
+        "🐾 *Запиши свой голос — узнай кто ты* 🐾",
+        parse_mode="Markdown"
+    )
 
 async def help_cmd(u,c):
-    await u.message.reply_text("🐱 *Как это работает* 🐱\n\n1️⃣ Отправь голосовое\n2️⃣ Мяукай, мурлычь, шипи\n3️⃣ Получи тотема!\n4️⃣ Поделись\n\nКоманды: /start /help /stats /about",parse_mode="Markdown")
+    await u.message.reply_text(
+        "🐱 *Кото-печенька — Как это работает* 🐱\n\n"
+        "1️⃣ Отправь голосовое сообщение\n"
+        "2️⃣ Мяукай, мурлычь, шипи, вой, ори\n"
+        "3️⃣ Получи своего кота-тотема!\n"
+        "4️⃣ Поделись с друзьями\n\n"
+        "✨ *Каждый голос уникален — каждый тотем священен* ✨\n\n"
+        "Команды: /start /help /stats /about",
+        parse_mode="Markdown"
+    )
 
 def main():
     logger.info("🌿 Дух Леса пробуждается...")
@@ -207,8 +240,9 @@ def main():
     app.add_handler(CommandHandler("stats",stats))
     app.add_handler(CommandHandler("about",about))
     app.add_handler(MessageHandler(filters.VOICE,handle_voice))
-    logger.info("🌿 Запущен!")
+    logger.info("🌿 Дух Леса взирает на мир... Запущен!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__=="__main__":
     main()
+
