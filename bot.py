@@ -1,7 +1,7 @@
 ﻿import logging, os, sys, io, random, tempfile, sqlite3, urllib.parse
 from datetime import datetime
 import numpy as np
-import librosa
+import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -101,12 +101,23 @@ def analyze_audio_bytes(ogg_bytes):
     tmp = tempfile.gettempdir()
     ogg_path = os.path.join(tmp, "cv.ogg")
     with open(ogg_path, "wb") as f: f.write(ogg_bytes)
-    try: y, sr = librosa.load(ogg_path, sr=22050, duration=5.0)
+    try:
+        y, sr = sf.read(ogg_path, dtype="float32")
+        if len(y) > sr * 5: y = y[:sr * 5]
     finally:
         if os.path.exists(ogg_path): os.remove(ogg_path)
-    rms = float(np.abs(y).mean())
-    f0, v, _ = librosa.pyin(y, fmin=50, fmax=800, sr=sr)
-    return rms, float(np.nanmean(f0[v])) if v.any() else 200.0
+    if len(y) < 1024: return float(np.abs(y).mean()), 200.0
+    y = y - np.mean(y)
+    n = len(y)
+    fft = np.fft.fft(y, n=2*n)
+    acf = np.fft.ifft(fft * np.conj(fft)).real[:n]
+    acf = acf / (acf[0] + 1e-10)
+    min_lag = max(1, int(sr / 800))
+    max_lag = min(len(acf) - 1, int(sr / 50))
+    if min_lag >= max_lag: return float(np.abs(y).mean()), 200.0
+    peak = np.argmax(acf[min_lag:max_lag]) + min_lag
+    f0 = sr / peak if acf[peak] > 0.1 else 200.0
+    return float(np.abs(y).mean()), float(f0)
 
 BG = [(20,15,40),(25,15,30),(40,25,10),(10,30,25),(35,10,20),(15,15,15)]
 EC = {"свет":(255,255,200),"тьма":(150,130,200),"огонь":(255,180,80),"вода":(100,200,255),
@@ -275,6 +286,7 @@ threading.Thread(target=lambda: http.server.HTTPServer(("0.0.0.0", int(os.enviro
 
 if __name__=="__main__":
     main()
+
 
 
 
