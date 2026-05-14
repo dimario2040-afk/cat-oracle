@@ -246,6 +246,11 @@ def main():
 import threading, http.server, os
 
 class HealthHandler(http.server.BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
@@ -270,6 +275,7 @@ threading.Thread(target=lambda: http.server.HTTPServer(("0.0.0.0", int(os.enviro
 
 if __name__=="__main__":
     main()
+
 
 
 
