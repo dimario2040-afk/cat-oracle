@@ -194,7 +194,7 @@ async def handle_voice(u,c):
         share_url=f"https://t.me/share/url?url=https://t.me/Catgift_bot&text={urllib.parse.quote(share_text)}"
         kb=[[InlineKeyboardButton("📢 Показать миру!",url=share_url)]]
         await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
-        await u.message.reply_voice(voice=vf.file_id)
+        await u.message.reply_voice(voice=u.message.voice.file_id, caption="🎧 *Твой голос услышан...*", parse_mode="Markdown")
         await u.message.reply_photo(
             photo=img,
             caption=f"🌟 *{cat['title']}* 🌟\n\n{cat['emoji']} *{cat['name']}*\n_{cat['description']}_\n\n🌀 Стихия: {cat['element']}\n\n*Хочешь узнать свой тотем?* Отправь боту голосовое сообщение с кошачьим голосом! 🐾",
@@ -287,6 +287,7 @@ threading.Thread(target=lambda: http.server.HTTPServer(("0.0.0.0", int(os.enviro
 
 if __name__=="__main__":
     main()
+
 
 
 
