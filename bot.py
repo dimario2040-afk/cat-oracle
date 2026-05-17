@@ -228,7 +228,7 @@ async def handle_voice(u,c):
         # Try to send pre-made image from image/ folder
         image_path = None
         for ext in ("jpg", "jpeg", "png"):
-            candidate = __import__("pathlib").Path("image") / f"{cat[\"id\"]}.{ext}"
+            candidate = Path("image") / (str(cat["id"]) + "." + ext)
             if candidate.is_file():
                 image_path = candidate
                 break
@@ -236,16 +236,16 @@ async def handle_voice(u,c):
             with open(image_path, "rb") as img_file:
                 await u.message.reply_photo(
                     photo=img_file,
-                    caption=f"🌟 *{cat[\"title\"]}* 🌟\n\n{cat[\"emoji\"]} *{cat[\"name\"]}*\n_{cat[\"description\"]}_\n\n🌀 Стихия: {cat[\"element\"]}*\n\n*Хочешь узнать свой тотем?* Отправь боту голосовое сообщение с кошачьим голосом! 🐾",
+                    caption=f"🌟 *{cat["title"]}* 🌟\n\n{cat["emoji"]} *{cat["name"]}*\n_{cat["description"]}_\n\n🌀 Стихия: {cat["element"]}*\n\n*Хочешь узнать свой тотем?* Отправь боту голосовое сообщение с кошачьим голосом! 🐾",
                     parse_mode="Markdown",
                     reply_markup=InlineKeyboardMarkup(kb)
                 )
         else:
             await u.message.reply_photo(
                 photo=img,
-                caption=f"🌟 *{cat[\"title\"]}* 🌟\n\n{cat[\"emoji\"]} *{cat[\"name\"]}*\n_{cat[\"description\"]}_\n\n🌀 Стихия: {cat[\"element\"]}*\n\n*Хочешь узнать свой тотем?* Отправь боту голосовое сообщение с кошачьим голосом! 🐾",
-                    parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup(kb)
+                caption=f"🌟 *{cat["title"]}* 🌟\n\n{cat["emoji"]} *{cat["name"]}*\n_{cat["description"]}_\n\n🌀 Стихия: {cat["element"]}*\n\n*Хочешь узнать свой тотем?* Отправь боту голосовое сообщение с кошачьим голосом! 🐾",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(kb)
             )
     except Exception as e:
         logger.error(f"Ошибка: {e}",exc_info=True)
