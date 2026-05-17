@@ -92,10 +92,40 @@ CATALOGUE = [{"id":c[0],"name":c[1],"title":c[2],"description":c[3],"element":c[
               "acoustic":{"min_rms":c[6],"max_rms":c[7],"min_f0":c[8],"max_f0":c[9]}} for c in CATS]
 
 def classify_cat(rms, f0):
-    cand = [c for c in CATALOGUE if c["acoustic"]["min_rms"]<=rms<=c["acoustic"]["max_rms"] and c["acoustic"]["min_f0"]<=f0<=c["acoustic"]["max_f0"]]
-    if not cand:
-        cand = sorted(CATALOGUE, key=lambda c: abs(rms-(c["acoustic"]["min_rms"]+c["acoustic"]["max_rms"])/2)*3+abs(f0-(c["acoustic"]["min_f0"]+c["acoustic"]["max_f0"])/2)*0.003)[:5]
-    return random.choice(cand[:3])
+    # Compute similarity for each cat
+    similarities = []
+    for cat in CATALOGUE:
+        a = cat["acoustic"]
+        rms_range = a["max_rms"] - a["min_rms"]
+        f0_range = a["max_f0"] - a["min_f0"]
+        if rms_range < 1e-6: rms_range = 1e-6
+        if f0_range < 1e-6: f0_range = 1e-6
+        # Compute how far outside the range each feature is (0 if inside)
+        rms_outside = 0.0
+        if rms < a["min_rms"]:
+            rms_outside = (a["min_rms"] - rms) / rms_range
+        elif rms > a["max_rms"]:
+            rms_outside = (rms - a["max_rms"]) / rms_range
+        f0_outside = 0.0
+        if f0 < a["min_f0"]:
+            f0_outside = (a["min_f0"] - f0) / f0_range
+        elif f0 > a["max_f0"]:
+            f0_outside = (f0 - a["max_f0"]) / f0_range
+        dist = (rms_outside**2 + f0_outside**2) ** 0.5
+        # Convert distance to similarity: closer -> higher similarity
+        similarity = __import__('math').exp(-dist * 1.0)  # temperature = 1.0
+        similarities.append(similarity)
+    # Normalize to get probabilities
+    total = sum(similarities)
+    if total == 0:
+        probabilities = [1.0 / len(CATALOGUE)] * len(CATALOGUE)
+    else:
+        probabilities = [s / total for s in similarities]
+    # Sample a cat according to probabilities
+    import random
+    chosen_index = random.choices(range(len(CATALOGUE)), weights=probabilities)[0]
+    return CATALOGUE[chosen_index]
+
 
 def analyze_audio_bytes(ogg_bytes):
     tmp = tempfile.gettempdir()
