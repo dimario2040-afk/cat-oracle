@@ -251,7 +251,7 @@ def main():
     app.add_handler(CommandHandler("help",help_cmd))
     app.add_handler(CommandHandler("stats",stats))
     app.add_handler(CommandHandler("about",about))
-    app.add_handler(MessageHandler(filters.VOICE,handle_voice))
+    app.add_handler(MessageHandler(filters.VOICE,handle_voice))`n    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
     logger.info("🌿 Дух Леса взирает на мир... Запущен!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
@@ -287,6 +287,8 @@ threading.Thread(target=lambda: http.server.HTTPServer(("0.0.0.0", int(os.enviro
 
 if __name__=="__main__":
     main()
+
+
 
 
 
