@@ -1,4 +1,4 @@
-﻿import logging, os, sys, io, random, tempfile, sqlite3, urllib.parse
+import logging, os, sys, io, random, tempfile, sqlite3, urllib.parse
 from datetime import datetime
 import numpy as np
 import soundfile as sf
@@ -95,7 +95,7 @@ def classify_cat(rms, f0):
     # Compute similarity for each cat
     similarities = []
     for cat in CATALOGUE:
-        a = cat["acoustic"]
+        a = cat['acoustic']
         rms_range = a["max_rms"] - a["min_rms"]
         f0_range = a["max_f0"] - a["min_f0"]
         if rms_range < 1e-6: rms_range = 1e-6
@@ -167,7 +167,7 @@ def gen_card(cat):
         x,y,r=random.randint(0,W),random.randint(0,H),random.randint(2,6)
         c=random.choice([(240,230,200),(200,220,255),(200,255,220),(255,200,220),(220,200,255),(255,220,180)])
         d.ellipse([x-r,y-r,x+r,y+r],fill=(c[0],c[1],c[2],random.randint(30,80)))
-    ec=EC.get(cat["element"],(200,200,200))
+    ec=EC.get(cat['element'],(200,200,200))
     try:
         fp=os.path.join(os.path.dirname(__file__),"font.ttf")
         ft=ImageFont.truetype(fp,44);fn=ImageFont.truetype(fp,32);fd=ImageFont.truetype(fp,22);fs=ImageFont.truetype(fp,18)
@@ -228,7 +228,7 @@ async def handle_voice(u,c):
         # Try to send pre-made image from image/ folder
         image_path = None
         for ext in ("jpg", "jpeg", "png"):
-            candidate = Path("image") / (str(cat["id"]) + "." + ext)
+            candidate = Path("image") / (str(cat['id']) + "." + ext)
             if candidate.is_file():
                 image_path = candidate
                 break
@@ -236,15 +236,15 @@ async def handle_voice(u,c):
             with open(image_path, "rb") as img_file:
                 await u.message.reply_photo(
                     photo=img_file,
-                    caption=f"🌟 *{cat["title"]}* 🌟\n\n{cat["emoji"]} *{cat["name"]}*\n_{cat["description"]}_\n\n🌀 Стихия: {cat["element"]}*\n\n*Хочешь узнать свой тотем?* Отправь боту голосовое сообщение с кошачьим голосом! 🐾",
-                    parse_mode="Markdown",
+                    caption=f"🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾",
+                    parse_mode=None,
                     reply_markup=InlineKeyboardMarkup(kb)
                 )
         else:
             await u.message.reply_photo(
                 photo=img,
-                caption=f"🌟 *{cat["title"]}* 🌟\n\n{cat["emoji"]} *{cat["name"]}*\n_{cat["description"]}_\n\n🌀 Стихия: {cat["element"]}*\n\n*Хочешь узнать свой тотем?* Отправь боту голосовое сообщение с кошачьим голосом! 🐾",
-                parse_mode="Markdown",
+                caption=f"🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾",
+                parse_mode=None,
                 reply_markup=InlineKeyboardMarkup(kb)
             )
     except Exception as e:
