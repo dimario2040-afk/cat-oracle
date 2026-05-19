@@ -281,6 +281,18 @@ async def help_cmd(u,c):
         parse_mode="Markdown"
     )
 
+def _get_user_cat(user_id):
+    try:
+        with sqlite3.connect(DB) as conn:
+            cur = conn.execute("SELECT cat_id FROM readings WHERE user_id=? ORDER BY ts DESC LIMIT 1", (user_id,))
+            row = cur.fetchone()
+            if row:
+                for c in CATS:
+                    if c[0] == row[0]:
+                        return {"id": c[0], "title": c[1], "name": c[2], "description": c[3], "element": c[4], "emoji": c[5]}
+    except: pass
+    return None
+
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.inline_query.query
     try:
@@ -289,18 +301,16 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.inline_query.answer([], cache_time=0, is_personal=True)
         return
     data = _share_data.get(user_id)
-    if data is None:
-        await update.inline_query.answer([], cache_time=0, is_personal=True)
-        return
-    cat = data["cat"]
-    share_text = f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/Catgift_bot"
+    cat = data["cat"] if data else _get_user_cat(user_id)
+    if cat:
+        share_text = f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/Catgift_bot"
+    else:
+        share_text = "🐱 Запиши голосовое боту @Catgift_bot и узнай свой тотем!"
     results = []
-    if data.get("file_id"):
+    if data and data.get("file_id"):
         try:
             results.append(InlineQueryResultCachedPhoto(
-                id="photo",
-                photo_file_id=data["file_id"],
-                caption=share_text,
+                id="photo", photo_file_id=data["file_id"], caption=share_text,
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🐱 Узнать своего кота!", url="https://t.me/Catgift_bot")
                 ]])
@@ -308,9 +318,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Inline photo error: {e}", exc_info=True)
     results.append(InlineQueryResultArticle(
-        id="text",
-        title="📢 Поделиться",
-        description=share_text,
+        id="text", title="📢 Поделиться", description=share_text,
         input_message_content=InputTextMessageContent(share_text, disable_web_page_preview=False),
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🐱 Узнать своего кота!", url="https://t.me/Catgift_bot")
