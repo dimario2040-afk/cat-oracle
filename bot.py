@@ -1,11 +1,11 @@
-import logging, os, sys, io, random, tempfile, sqlite3, urllib.parse, time
+import logging, os, sys, io, random, tempfile, sqlite3, urllib.parse, asyncio
+from aiohttp import web
 from pathlib import Path
 from datetime import datetime
 import numpy as np
 import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto, InlineQueryResultArticle, InputTextMessageContent
-from telegram.error import Conflict
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, ContextTypes
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -327,42 +327,55 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ))
     await update.inline_query.answer(results, cache_time=0, is_personal=True)
 
-import threading, http.server
-
-class HealthHandler(http.server.BaseHTTPRequestHandler):
-    def do_HEAD(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"Bot is alive")
-
-def main():
+async def async_main():
     logger.info("🌿 Дух Леса пробуждается...")
     init_db()
     PORT = int(os.environ.get("PORT", 10000))
-    threading.Thread(target=lambda: http.server.HTTPServer(("0.0.0.0", PORT), HealthHandler).serve_forever(), daemon=True).start()
-    while True:
+    BASE = os.environ.get("RENDER_EXTERNAL_URL", "https://cat-oracle-3jeq.onrender.com")
+    SECRET = os.environ.get("WEBHOOK_SECRET", "forest-whisper")
+    app = Application.builder().token(BOT_TOKEN).updater(None).build()
+    app.add_handler(CommandHandler("start",start))
+    app.add_handler(CommandHandler("help",help_cmd))
+    app.add_handler(CommandHandler("stats",stats))
+    app.add_handler(CommandHandler("about",about))
+    app.add_handler(MessageHandler(filters.VOICE,handle_voice))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
+    app.add_handler(InlineQueryHandler(inline_query))
+    await app.initialize()
+    await app.start()
+    webhook_url = f"{BASE}/{SECRET}"
+    await app.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+    logger.info(f"🌿 Webhook установлен: {webhook_url}")
+    logger.info("🌿 Дух Леса взирает на мир... Запущен!")
+
+    async def webhook_handle(request):
         try:
-            app=Application.builder().token(BOT_TOKEN).build()
-            app.add_handler(CommandHandler("start",start))
-            app.add_handler(CommandHandler("help",help_cmd))
-            app.add_handler(CommandHandler("stats",stats))
-            app.add_handler(CommandHandler("about",about))
-            app.add_handler(MessageHandler(filters.VOICE,handle_voice))
-            app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
-            app.add_handler(InlineQueryHandler(inline_query))
-            logger.info("🌿 Дух Леса взирает на мир... Запущен!")
-            app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        except Conflict:
-            logger.warning("⚠️ 409 Conflict — другой экземпляр жив. Жду 10с...")
-            time.sleep(10)
+            update = Update.de_json(await request.json(), app.bot)
+            await app.process_update(update)
+            return web.Response(status=200)
         except Exception as e:
-            logger.error(f"🔥 Ошибка: {e}", exc_info=True)
-            time.sleep(5)
+            logger.error(f"Webhook error: {e}", exc_info=True)
+            return web.Response(status=500)
+
+    async def health_handle(_request):
+        return web.Response(text="Bot is alive")
+
+    web_app = web.Application()
+    web_app.router.add_post(f"/{SECRET}", webhook_handle)
+    web_app.router.add_get("/", health_handle)
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    logger.info(f"🌿 HTTP сервер на порту {PORT}")
+
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await app.stop()
+
+def main():
+    asyncio.run(async_main())
 
 if __name__=="__main__":
     main()
