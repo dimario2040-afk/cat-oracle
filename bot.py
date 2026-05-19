@@ -228,7 +228,7 @@ async def handle_voice(u,c):
         await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
         await u.message.reply_voice(voice=u.message.voice.file_id, caption="🎧 *Твой голос услышан...*", parse_mode="Markdown")
         caption=f"🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾"
-        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📢 Показать миру!", switch_inline_query=str(u.effective_user.id))]])
+        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📢 Показать миру!", switch_inline_query=str(u.effective_user.id))],[InlineKeyboardButton("🔗 Ссылка на бота", url="https://t.me/Catgift_bot")]])
         image_path = None
         for ext in ("jpg", "jpeg", "png"):
             candidate = Path("image") / (str(cat['id']) + "." + ext)
@@ -364,8 +364,12 @@ async def async_main():
     async def webhook_handle(request):
         try:
             data = await request.json()
+            keys = list(data.keys())
+            uid = data.get("update_id")
+            has_inline = "inline_query" in keys
+            logger.info(f"Webhook update_id={uid} keys={keys} inline={has_inline}")
             update = Update.de_json(data, app.bot)
-            if update.inline_query:
+            if has_inline:
                 await inline_query(update, None)
             else:
                 await app.process_update(update)
