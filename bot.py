@@ -230,7 +230,7 @@ async def handle_voice(u,c):
         caption=f"🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾"
         share_msg = f"🐱 Я получил тотем «{cat['title']}» в @Catgift_bot! Узнай свой — запиши голосовое 🐾\n\nhttps://t.me/Catgift_bot"
         share_url = "https://t.me/share/url?url=" + urllib.parse.quote("https://t.me/Catgift_bot") + "&text=" + urllib.parse.quote(share_msg)
-        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")]])
+        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")],[InlineKeyboardButton("📢 Поделиться с друзьями", url=share_url)]])
         image_path = None
         for ext in ("jpg", "jpeg", "png"):
             candidate = Path("image") / (str(cat['id']) + "." + ext)
@@ -298,11 +298,7 @@ async def save_card(u: Update, c: ContextTypes.DEFAULT_TYPE):
         return
     try:
         await c.bot.copy_message(chat_id=user_id, from_chat_id=data["chat_id"], message_id=data["message_id"])
-        share_msg = f"🐱 Я получил тотем «{data['cat']['title']}» в @Catgift_bot! Узнай свой — запиши голосовое 🐾\n\nhttps://t.me/Catgift_bot"
-        share_url = "https://t.me/share/url?url=" + urllib.parse.quote("https://t.me/Catgift_bot") + "&text=" + urllib.parse.quote(share_msg)
-        share_kb = InlineKeyboardMarkup([[InlineKeyboardButton("📢 Поделиться карточкой", url=share_url)]])
-        await c.bot.edit_message_reply_markup(chat_id=data["chat_id"], message_id=data["message_id"], reply_markup=share_kb)
-        await query.answer("✅ Сохранено! Теперь можно поделиться с друзьями.", show_alert=True)
+        await query.answer("✅ Сохранено в Избранном!", show_alert=True)
     except Exception as e:
         logger.error(f"Save card error: {e}", exc_info=True)
         await query.answer("❌ Не удалось сохранить. Попробуй ещё раз.", show_alert=True)
