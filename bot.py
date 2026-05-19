@@ -6,7 +6,7 @@ import numpy as np
 import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto, InlineQueryResultArticle, InputTextMessageContent
-from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -228,7 +228,7 @@ async def handle_voice(u,c):
         await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
         await u.message.reply_voice(voice=u.message.voice.file_id, caption="🎧 *Твой голос услышан...*", parse_mode="Markdown")
         caption=f"🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾"
-        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📢 Показать миру!", switch_inline_query=str(u.effective_user.id))],[InlineKeyboardButton("🔗 Ссылка на бота", url="https://t.me/Catgift_bot")]])
+        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")],[InlineKeyboardButton("🔗 Поделиться ботом", url="https://t.me/Catgift_bot")]])
         image_path = None
         for ext in ("jpg", "jpeg", "png"):
             candidate = Path("image") / (str(cat['id']) + "." + ext)
@@ -243,7 +243,7 @@ async def handle_voice(u,c):
         fid = sent.photo[-1].file_id
         try:record_reading(u.effective_user.id,cat['id'],cat['name'],fid)
         except:pass
-        _share_data[u.effective_user.id] = {"file_id": fid, "cat": cat}
+        _share_data[u.effective_user.id] = {"file_id": fid, "cat": cat, "chat_id": u.effective_chat.id, "message_id": sent.message_id}
     except Exception as e:
         logger.error(f"Ошибка: {e}",exc_info=True)
         try:await c.bot.edit_message_text("🌫 *Туман сгущается...* Попробуй ещё раз! 🐱\n\n_Подсказка: запиши голос подлиннее (3-5 секунд)_",chat_id=u.effective_chat.id,message_id=s.message_id,parse_mode="Markdown")
@@ -285,6 +285,25 @@ async def help_cmd(u,c):
         "Команды: /start /help /stats /about",
         parse_mode="Markdown"
     )
+
+async def save_card(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    query = u.callback_query
+    await query.answer()
+    user_id = u.effective_user.id
+    data = _share_data.get(user_id)
+    if not data or "chat_id" not in data or "message_id" not in data:
+        await query.edit_message_text("🌫 Карточка утеряна в тумане... Отправь голосовое заново!")
+        return
+    try:
+        await c.bot.copy_message(
+            chat_id=user_id,
+            from_chat_id=data["chat_id"],
+            message_id=data["message_id"]
+        )
+        await query.answer("✅ Карточка сохранена в Избранном! Оттуда можно переслать друзьям.", show_alert=True)
+    except Exception as e:
+        logger.error(f"Save card error: {e}", exc_info=True)
+        await query.answer("❌ Не удалось сохранить. Попробуй ещё раз.", show_alert=True)
 
 def _get_user_cat(user_id):
     try:
@@ -353,6 +372,7 @@ async def async_main():
     app.add_handler(CommandHandler("about",about))
     app.add_handler(MessageHandler(filters.VOICE,handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
+    app.add_handler(CallbackQueryHandler(save_card, pattern="^save_card$"))
     app.add_handler(InlineQueryHandler(inline_query))
     await app.initialize()
     await app.start()
