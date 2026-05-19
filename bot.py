@@ -239,9 +239,9 @@ async def handle_voice(u,c):
                 break
         if image_path is not None:
             with open(image_path, "rb") as img_file:
-                sent=await u.message.reply_photo(photo=img_file, caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=60)
+                sent=await u.message.reply_photo(photo=img_file, caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=120, read_timeout=120)
         else:
-            sent=await u.message.reply_photo(photo=io.BytesIO(img), caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=60)
+            sent=await u.message.reply_photo(photo=io.BytesIO(img), caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=120, read_timeout=120)
         fid = sent.photo[-1].file_id
         try:record_reading(u.effective_user.id,cat['id'],cat['name'],fid)
         except:pass
@@ -368,7 +368,7 @@ async def async_main():
     PORT = int(os.environ.get("PORT", 10000))
     BASE = os.environ.get("RENDER_EXTERNAL_URL", "https://cat-oracle-3jeq.onrender.com")
     SECRET = os.environ.get("WEBHOOK_SECRET", "forest-whisper")
-    app = Application.builder().token(BOT_TOKEN).updater(None).request(HTTPXRequest(read_timeout=30, write_timeout=60, connect_timeout=30, pool_timeout=10)).build()
+    app = Application.builder().token(BOT_TOKEN).updater(None).request(HTTPXRequest(read_timeout=120, write_timeout=120, connect_timeout=30, pool_timeout=10)).build()
     app.add_handler(CommandHandler("start",start))
     app.add_handler(CommandHandler("help",help_cmd))
     app.add_handler(CommandHandler("stats",stats))
