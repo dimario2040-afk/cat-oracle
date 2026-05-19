@@ -295,10 +295,8 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cat = data["cat"]
     share_text = f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/Catgift_bot"
     try:
-        img = gen_card(cat)
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85)
-        buf.seek(0)
+        img_bytes = gen_card(cat)
+        buf = io.BytesIO(img_bytes)
         from_user = update.inline_query.from_user
         temp = await context.bot.send_photo(chat_id=from_user.id, photo=buf)
         file_id = temp.photo[-1].file_id
