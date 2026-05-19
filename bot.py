@@ -392,13 +392,13 @@ async def async_main():
             logger.info(f"Webhook update_id={uid} keys={keys} inline={has_inline}")
             update = Update.de_json(data, app.bot)
             if has_inline:
-                await inline_query(update, None)
+                asyncio.ensure_future(inline_query(update, None))
             else:
-                await app.process_update(update)
+                asyncio.ensure_future(app.process_update(update))
             return web.Response(status=200)
         except Exception as e:
             logger.error(f"Webhook error: {e}", exc_info=True)
-            return web.Response(status=500)
+            return web.Response(status=200)
 
     async def health_handle(_request):
         return web.Response(text="Bot is alive")
