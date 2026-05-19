@@ -193,11 +193,13 @@ def gen_card(cat):
 DB=os.path.join(os.path.dirname(__file__),"sanctuary.db")
 def init_db():
     with sqlite3.connect(DB) as c:
-        c.execute("CREATE TABLE IF NOT EXISTS readings(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,cat_id INTEGER,cat_name TEXT,ts TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS readings(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,cat_id INTEGER,cat_name TEXT,file_id TEXT,ts TEXT)")
+        try:c.execute("ALTER TABLE readings ADD COLUMN file_id TEXT")
+        except:pass
         c.execute("CREATE TABLE IF NOT EXISTS stats(id INTEGER PRIMARY KEY AUTOINCREMENT,total INTEGER DEFAULT 0,users INTEGER DEFAULT 0)")
-def record_reading(uid,cid,cname):
+def record_reading(uid,cid,cname,fid):
     with sqlite3.connect(DB) as c:
-        c.execute("INSERT INTO readings(user_id,cat_id,cat_name,ts) VALUES(?,?,?,?)",(uid,cid,cname,datetime.now().isoformat()))
+        c.execute("INSERT INTO readings(user_id,cat_id,cat_name,file_id,ts) VALUES(?,?,?,?,?)",(uid,cid,cname,fid,datetime.now().isoformat()))
         c.execute("UPDATE stats SET total=COALESCE(total,0)+1 WHERE id=1")
         if c.rowcount==0:c.execute("INSERT INTO stats(id,total,users) VALUES(1,1,0)")
         c.execute("SELECT COUNT(DISTINCT user_id) FROM readings");c.execute("UPDATE stats SET users=? WHERE id=1",(c.fetchone()[0],))
@@ -220,8 +222,6 @@ async def handle_voice(u,c):
         await c.bot.edit_message_text("🎵 Эхо разносится по лесу...",chat_id=u.effective_chat.id,message_id=s.message_id)
         rms,f0=analyze_audio_bytes(ob);logger.info(f"User {u.effective_user.id}: rms={rms:.3f}, f0={f0:.1f}")
         cat=classify_cat(rms,f0);logger.info(f"  → Тотем: {cat['name']}")
-        try:record_reading(u.effective_user.id,cat['id'],cat['name'])
-        except:pass
         await c.bot.edit_message_text("🔮 Древние силы сплетают твою суть...",chat_id=u.effective_chat.id,message_id=s.message_id)
         img=gen_card(cat)
         await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
@@ -239,7 +239,10 @@ async def handle_voice(u,c):
                 sent=await u.message.reply_photo(photo=img_file, caption=caption, parse_mode=None, reply_markup=share_kb)
         else:
             sent=await u.message.reply_photo(photo=img, caption=caption, parse_mode=None, reply_markup=share_kb)
-        _share_data[u.effective_user.id] = {"file_id": sent.photo[-1].file_id, "cat": cat}
+        fid = sent.photo[-1].file_id
+        try:record_reading(u.effective_user.id,cat['id'],cat['name'],fid)
+        except:pass
+        _share_data[u.effective_user.id] = {"file_id": fid, "cat": cat}
     except Exception as e:
         logger.error(f"Ошибка: {e}",exc_info=True)
         try:await c.bot.edit_message_text("🌫 *Туман сгущается...* Попробуй ещё раз! 🐱\n\n_Подсказка: запиши голос подлиннее (3-5 секунд)_",chat_id=u.effective_chat.id,message_id=s.message_id,parse_mode="Markdown")
@@ -285,12 +288,12 @@ async def help_cmd(u,c):
 def _get_user_cat(user_id):
     try:
         with sqlite3.connect(DB) as conn:
-            cur = conn.execute("SELECT cat_id FROM readings WHERE user_id=? ORDER BY ts DESC LIMIT 1", (user_id,))
+            cur = conn.execute("SELECT cat_id,file_id FROM readings WHERE user_id=? ORDER BY ts DESC LIMIT 1", (user_id,))
             row = cur.fetchone()
             if row:
                 for c in CATS:
                     if c[0] == row[0]:
-                        return {"id": c[0], "title": c[1], "name": c[2], "description": c[3], "element": c[4], "emoji": c[5]}
+                        return {"id": c[0], "title": c[1], "name": c[2], "description": c[3], "element": c[4], "emoji": c[5], "file_id": row[1]}
     except: pass
     return None
 
@@ -302,16 +305,18 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.inline_query.answer([], cache_time=0, is_personal=True)
         return
     data = _share_data.get(user_id)
-    cat = data["cat"] if data else _get_user_cat(user_id)
+    db_cat = _get_user_cat(user_id) if not data else None
+    cat = data["cat"] if data else (db_cat if db_cat else None)
+    file_id = data.get("file_id") if data else (db_cat.get("file_id") if db_cat else None)
     if cat:
         share_text = f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/Catgift_bot"
     else:
         share_text = "🐱 Запиши голосовое боту @Catgift_bot и узнай свой тотем!"
     results = []
-    if data and data.get("file_id"):
+    if file_id:
         try:
             results.append(InlineQueryResultCachedPhoto(
-                id="photo", photo_file_id=data["file_id"], caption=share_text,
+                id="photo", photo_file_id=file_id, caption=share_text,
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🐱 Узнать своего кота!", url="https://t.me/Catgift_bot")
                 ]])
