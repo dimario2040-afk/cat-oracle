@@ -7,6 +7,7 @@ import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -345,7 +346,7 @@ async def async_main():
     PORT = int(os.environ.get("PORT", 10000))
     BASE = os.environ.get("RENDER_EXTERNAL_URL", "https://cat-oracle-3jeq.onrender.com")
     SECRET = os.environ.get("WEBHOOK_SECRET", "forest-whisper")
-    app = Application.builder().token(BOT_TOKEN).updater(None).build()
+    app = Application.builder().token(BOT_TOKEN).updater(None).request(HTTPXRequest(read_timeout=30, write_timeout=30, connect_timeout=15, pool_timeout=5)).build()
     app.add_handler(CommandHandler("start",start))
     app.add_handler(CommandHandler("help",help_cmd))
     app.add_handler(CommandHandler("stats",stats))
@@ -362,8 +363,12 @@ async def async_main():
 
     async def webhook_handle(request):
         try:
-            update = Update.de_json(await request.json(), app.bot)
-            await app.process_update(update)
+            data = await request.json()
+            update = Update.de_json(data, app.bot)
+            if update.inline_query:
+                await inline_query(update, None)
+            else:
+                await app.process_update(update)
             return web.Response(status=200)
         except Exception as e:
             logger.error(f"Webhook error: {e}", exc_info=True)
