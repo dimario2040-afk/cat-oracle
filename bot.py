@@ -1,5 +1,6 @@
 import logging, os, sys, io, random, tempfile, sqlite3, urllib.parse, asyncio
 from aiohttp import web
+from pathlib import Path
 from datetime import datetime
 import numpy as np
 import soundfile as sf
@@ -230,7 +231,17 @@ async def handle_voice(u,c):
         share_msg = f"🐱 Я записал голос в @Catgift_bot и получил тотем «{cat['title']}»! Узнай своего — отправь голосовое боту!"
         share_url = "https://t.me/share/url?url=" + urllib.parse.quote("https://t.me/Catgift_bot") + "&text=" + urllib.parse.quote(share_msg)
         share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")],[InlineKeyboardButton("📢 Поделиться с другом", url=share_url)]])
-        sent=await u.message.reply_photo(photo=img, caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=60)
+        image_path = None
+        for ext in ("jpg", "jpeg", "png"):
+            candidate = Path("image") / (str(cat['id']) + "." + ext)
+            if candidate.is_file():
+                image_path = candidate
+                break
+        if image_path is not None:
+            with open(image_path, "rb") as img_file:
+                sent=await u.message.reply_photo(photo=img_file, caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=60)
+        else:
+            sent=await u.message.reply_photo(photo=io.BytesIO(img), caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=60)
         fid = sent.photo[-1].file_id
         try:record_reading(u.effective_user.id,cat['id'],cat['name'],fid)
         except:pass
