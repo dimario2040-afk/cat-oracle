@@ -4,7 +4,7 @@ from datetime import datetime
 import numpy as np
 import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, ContextTypes
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -294,26 +294,28 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     cat = data["cat"]
     share_text = f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/Catgift_bot"
-    try:
-        img_bytes = gen_card(cat)
-        buf = io.BytesIO(img_bytes)
-        from_user = update.inline_query.from_user
-        temp = await context.bot.send_photo(chat_id=from_user.id, photo=buf)
-        file_id = temp.photo[-1].file_id
-        await context.bot.delete_message(chat_id=from_user.id, message_id=temp.message_id)
-        results = [
-            InlineQueryResultCachedPhoto(
-                id=str(user_id),
-                photo_file_id=file_id,
+    results = []
+    if data.get("file_id"):
+        try:
+            results.append(InlineQueryResultCachedPhoto(
+                id="photo",
+                photo_file_id=data["file_id"],
                 caption=share_text,
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🐱 Узнать своего кота!", url="https://t.me/Catgift_bot")
                 ]])
-            )
-        ]
-    except Exception as e:
-        logger.error(f"Inline error: {e}", exc_info=True)
-        results = []
+            ))
+        except Exception as e:
+            logger.error(f"Inline photo error: {e}", exc_info=True)
+    results.append(InlineQueryResultArticle(
+        id="text",
+        title="📢 Поделиться",
+        description=share_text,
+        input_message_content=InputTextMessageContent(share_text, disable_web_page_preview=False),
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🐱 Узнать своего кота!", url="https://t.me/Catgift_bot")
+        ]])
+    ))
     await update.inline_query.answer(results, cache_time=0, is_personal=True)
 
 def main():
