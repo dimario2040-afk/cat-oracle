@@ -3,8 +3,8 @@ from datetime import datetime
 import numpy as np
 import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto
+from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, ContextTypes
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -90,6 +90,8 @@ CATS = [
 
 CATALOGUE = [{"id":c[0],"name":c[1],"title":c[2],"description":c[3],"element":c[4],"emoji":c[5],
               "acoustic":{"min_rms":c[6],"max_rms":c[7],"min_f0":c[8],"max_f0":c[9]}} for c in CATS]
+
+_share_data = {}
 
 def classify_cat(rms, f0):
     # Compute similarity for each cat
@@ -220,12 +222,10 @@ async def handle_voice(u,c):
         except:pass
         await c.bot.edit_message_text("🔮 Древние силы сплетают твою суть...",chat_id=u.effective_chat.id,message_id=s.message_id)
         img=gen_card(cat)
-        share_text=f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/Catgift_bot"
-        share_url=f"https://t.me/share/url?url=https://t.me/Catgift_bot&text={urllib.parse.quote(share_text)}"
-        kb=[[InlineKeyboardButton("📢 Показать миру!",url=share_url)]]
         await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
         await u.message.reply_voice(voice=u.message.voice.file_id, caption="🎧 *Твой голос услышан...*", parse_mode="Markdown")
-        # Try to send pre-made image from image/ folder
+        caption=f"🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾"
+        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📢 Показать миру!", switch_inline_query=str(u.effective_user.id))]])
         image_path = None
         for ext in ("jpg", "jpeg", "png"):
             candidate = Path("image") / (str(cat['id']) + "." + ext)
@@ -234,19 +234,10 @@ async def handle_voice(u,c):
                 break
         if image_path is not None:
             with open(image_path, "rb") as img_file:
-                await u.message.reply_photo(
-                    photo=img_file,
-                    caption=f"🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾",
-                    parse_mode=None,
-                    reply_markup=InlineKeyboardMarkup(kb)
-                )
+                sent=await u.message.reply_photo(photo=img_file, caption=caption, parse_mode=None, reply_markup=share_kb)
         else:
-            await u.message.reply_photo(
-                photo=img,
-                caption=f"🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾",
-                parse_mode=None,
-                reply_markup=InlineKeyboardMarkup(kb)
-            )
+            sent=await u.message.reply_photo(photo=img, caption=caption, parse_mode=None, reply_markup=share_kb)
+        _share_data[u.effective_user.id] = {"file_id": sent.photo[-1].file_id, "cat": cat}
     except Exception as e:
         logger.error(f"Ошибка: {e}",exc_info=True)
         try:await c.bot.edit_message_text("🌫 *Туман сгущается...* Попробуй ещё раз! 🐱\n\n_Подсказка: запиши голос подлиннее (3-5 секунд)_",chat_id=u.effective_chat.id,message_id=s.message_id,parse_mode="Markdown")
@@ -289,6 +280,31 @@ async def help_cmd(u,c):
         parse_mode="Markdown"
     )
 
+async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.inline_query.query
+    try:
+        user_id = int(q)
+    except (ValueError, TypeError):
+        await update.inline_query.answer([], cache_time=0, is_personal=True)
+        return
+    data = _share_data.get(user_id)
+    if data is None:
+        await update.inline_query.answer([], cache_time=0, is_personal=True)
+        return
+    cat = data["cat"]
+    share_text = f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/Catgift_bot"
+    results = [
+        InlineQueryResultCachedPhoto(
+            id=str(user_id),
+            photo_file_id=data["file_id"],
+            caption=share_text,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🐱 Узнать своего кота!", url="https://t.me/Catgift_bot")
+            ]])
+        )
+    ]
+    await update.inline_query.answer(results, cache_time=0, is_personal=True)
+
 def main():
     logger.info("🌿 Дух Леса пробуждается...")
     init_db()
@@ -299,6 +315,7 @@ def main():
     app.add_handler(CommandHandler("about",about))
     app.add_handler(MessageHandler(filters.VOICE,handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
+    app.add_handler(InlineQueryHandler(inline_query))
     logger.info("🌿 Дух Леса взирает на мир... Запущен!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
