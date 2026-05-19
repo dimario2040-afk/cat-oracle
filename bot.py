@@ -206,8 +206,11 @@ def init_db():
         try:c.execute("ALTER TABLE readings ADD COLUMN file_id TEXT")
         except:pass
         c.execute("CREATE TABLE IF NOT EXISTS stats(id INTEGER PRIMARY KEY AUTOINCREMENT,total INTEGER DEFAULT 0,users INTEGER DEFAULT 0)")
-        c.execute("CREATE TABLE IF NOT EXISTS user_limits(user_id INTEGER PRIMARY KEY,daily_date TEXT,daily_count INTEGER DEFAULT 0,unlimited_until TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS user_limits(user_id INTEGER PRIMARY KEY,daily_date TEXT,daily_count INTEGER DEFAULT 0,unlimited_until TEXT,bonus_readings INTEGER DEFAULT 0)")
+        try: c.execute("ALTER TABLE user_limits ADD COLUMN bonus_readings INTEGER DEFAULT 0")
+        except: pass
         c.execute("CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,payload TEXT,stars INTEGER,ts TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS referrals(id INTEGER PRIMARY KEY AUTOINCREMENT,referrer_id INTEGER,referee_id INTEGER,ts TEXT)")
 def record_reading(uid,cid,cname,fid):
     with sqlite3.connect(DB) as c:
         c.execute("INSERT INTO readings(user_id,cat_id,cat_name,file_id,ts) VALUES(?,?,?,?,?)",(uid,cid,cname,fid,datetime.now().isoformat()))
@@ -217,8 +220,8 @@ def record_reading(uid,cid,cname,fid):
 
 def _get_limit_info(user_id):
     with sqlite3.connect(DB) as conn:
-        row = conn.execute("SELECT daily_date, daily_count, unlimited_until FROM user_limits WHERE user_id=?", (user_id,)).fetchone()
-        if row: return {"daily_date": row[0], "daily_count": row[1], "unlimited_until": row[2]}
+        row = conn.execute("SELECT daily_date, daily_count, unlimited_until, bonus_readings FROM user_limits WHERE user_id=?", (user_id,)).fetchone()
+        if row: return {"daily_date": row[0], "daily_count": row[1], "unlimited_until": row[2], "bonus_readings": row[3] or 0}
         return None
 
 def _can_read(user_id):
@@ -229,7 +232,9 @@ def _can_read(user_id):
             if datetime.fromisoformat(info["unlimited_until"]) > datetime.now():
                 return "premium"
         except: pass
-    if info and info["daily_date"] == today and info["daily_count"] >= 3:
+    daily_used = info["daily_count"] if info and info["daily_date"] == today else 0
+    extra = info["bonus_readings"] if info else 0
+    if daily_used >= 3 + extra:
         return "limit"
     return "ok"
 
@@ -239,9 +244,17 @@ def _use_reading(user_id):
         info = _get_limit_info(user_id)
         if info:
             if info["daily_date"] == today:
+                bonus = info["bonus_readings"] or 0
+                if bonus > 0 and info["daily_count"] >= 3:
+                    conn.execute("UPDATE user_limits SET bonus_readings=bonus_readings-1 WHERE user_id=?", (user_id,))
+                    return
                 conn.execute("UPDATE user_limits SET daily_count=daily_count+1 WHERE user_id=?", (user_id,))
             else:
-                conn.execute("UPDATE user_limits SET daily_date=?, daily_count=1 WHERE user_id=?", (today, user_id))
+                bonus = info["bonus_readings"] or 0
+                if bonus > 0:
+                    conn.execute("UPDATE user_limits SET daily_date=?, daily_count=0, bonus_readings=bonus_readings-1 WHERE user_id=?", (today, user_id))
+                else:
+                    conn.execute("UPDATE user_limits SET daily_date=?, daily_count=1 WHERE user_id=?", (today, user_id))
         else:
             conn.execute("INSERT INTO user_limits(user_id, daily_date, daily_count) VALUES(?,?,1)", (user_id, today))
 
@@ -254,8 +267,9 @@ def _get_daily_remaining(user_id):
                 return float('inf')
         except: pass
     today = datetime.now().strftime("%Y-%m-%d")
-    if info["daily_date"] == today: return max(0, 3 - info["daily_count"])
-    return 3
+    extra = info["bonus_readings"] or 0
+    if info["daily_date"] == today: return max(0, 3 + extra - info["daily_count"])
+    return 3 + extra
 
 def _set_unlimited(user_id, days=30):
     until = (datetime.now() + timedelta(days=days)).isoformat()
@@ -267,7 +281,21 @@ def _record_payment(user_id, payload, stars):
     with sqlite3.connect(DB) as conn:
         conn.execute("INSERT INTO payments(user_id, payload, stars, ts) VALUES(?,?,?,?)", (user_id, payload, stars, datetime.now().isoformat()))
 
+def _add_bonus(user_id, amount=1):
+    with sqlite3.connect(DB) as conn:
+        conn.execute("INSERT INTO user_limits(user_id,daily_date,daily_count,bonus_readings) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET bonus_readings=bonus_readings+?", (user_id, datetime.now().strftime("%Y-%m-%d"), 0, amount, amount))
+
 async def start(u,c):
+    args = c.args
+    if args and args[0].startswith("ref_"):
+        referrer_id = int(args[0][4:])
+        referee_id = u.effective_user.id
+        if referrer_id != referee_id:
+            _add_bonus(referrer_id, 1)
+            try:
+                with sqlite3.connect(DB) as conn:
+                    conn.execute("INSERT INTO referrals(referrer_id, referee_id, ts) VALUES(?,?,?)", (referrer_id, referee_id, datetime.now().isoformat()))
+            except: pass
     await u.message.reply_text(
         f"🌿 *Дух Леса приветствует тебя, {u.effective_user.first_name}...* 🌿\n\n"
         "Ты стоишь на пороге *Зачарованного Леса*.\n"
@@ -318,7 +346,7 @@ async def handle_voice(u,c):
         await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
         await u.message.reply_voice(voice=u.message.voice.file_id, caption="🎧 *Твой голос услышан...*", parse_mode="Markdown")
         prefix = "👑 " if legendary else ""
-        caption=f"{prefix}🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾"
+        caption=f"{prefix}🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾\n\n👥 Приведи друга — получи +1 гадание: https://t.me/Catgift_bot?start=ref_{user_id}"
         share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")],[InlineKeyboardButton("📢 Поделиться с друзьями", switch_inline_query=str(user_id))]])
         image_path = None
         for ext in ("jpg", "jpeg", "png"):
@@ -575,7 +603,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cat = data["cat"] if data else (db_cat if db_cat else None)
     file_id = data.get("file_id") if data else (db_cat.get("file_id") if db_cat else None)
     if cat:
-        share_text = f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/Catgift_bot"
+        share_text = f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/Catgift_bot?start=ref_{user_id}"
     else:
         share_text = "🐱 Запиши голосовое боту @Catgift_bot и узнай свой тотем!"
     logger.info(f"Inline: data={'yes' if data else 'no'}, db_cat={'yes' if db_cat else 'no'}, cat={'yes' if cat else 'no'}, file_id={'yes' if file_id else 'no'}")
