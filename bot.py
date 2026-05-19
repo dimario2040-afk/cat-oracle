@@ -404,6 +404,7 @@ async def premium(u,c):
         [InlineKeyboardButton("⭐ Безлимит (1 Star)", callback_data="buy_unlimited")],
         [InlineKeyboardButton("🔄 Переброс (2 Stars)", callback_data="buy_reroll")],
         [InlineKeyboardButton("👑 Легендарный (3 Stars)", callback_data="buy_legendary")],
+        [InlineKeyboardButton("💝 Поддержать донатом", callback_data="donate")],
     ])
     await u.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
@@ -475,6 +476,63 @@ async def successful_payment_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
             "🐱 *Мяу-у-у...*",
             parse_mode="Markdown"
         )
+    elif payload == "donate":
+        stars = u.message.successful_payment.total_amount
+        await u.message.reply_text(
+            f"💝 *Огромное спасибо за поддержку ({stars} ⭐)!* 💝\n\n"
+            "Дух Леса чувствует твою доброту.\n"
+            "Благодаря таким путникам, как ты, Лес становится больше!\n\n"
+            "🐾 *Мяу-у-у...* 🐾",
+            parse_mode="Markdown"
+        )
+
+async def donate(u,c):
+    await u.message.reply_text(
+        "💝 *Поддержать Зачарованный Лес* 💝\n\n"
+        "Если тебе нравится бот и ты хочешь помочь Лесу расти —\n"
+        "выбери сумму доната:\n\n"
+        "⭐ *1 Star* — тёплое спасибо от Духа Леса\n"
+        "⭐ *3 Stars* — благословение древних котов\n"
+        "⭐ *5 Stars* — ты становишься Хранителем Леса 🌲",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💝 1 Star", callback_data="donate_1")],
+            [InlineKeyboardButton("💝 3 Stars", callback_data="donate_3")],
+            [InlineKeyboardButton("💝 5 Stars", callback_data="donate_5")],
+        ])
+    )
+
+async def donate_show_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    query = u.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "💝 *Поддержать Зачарованный Лес* 💝\n\n"
+        "Выбери сумму доната:\n\n"
+        "⭐ *1 Star* — тёплое спасибо\n"
+        "⭐ *3 Stars* — благословение древних котов\n"
+        "⭐ *5 Stars* — ты Хранитель Леса 🌲",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💝 1 Star", callback_data="donate_1")],
+            [InlineKeyboardButton("💝 3 Stars", callback_data="donate_3")],
+            [InlineKeyboardButton("💝 5 Stars", callback_data="donate_5")],
+        ])
+    )
+
+async def donate_amount_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    query = u.callback_query
+    await query.answer()
+    user_id = u.effective_user.id
+    stars = int(query.data.split("_")[1])
+    await c.bot.send_invoice(
+        chat_id=user_id,
+        title="💝 Донат Зачарованному Лесу",
+        description=f"Благодарим за поддержку! ({stars} ⭐)",
+        payload="donate",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label=f"Донат {stars} ⭐", amount=stars)],
+    )
 
 async def save_card(u: Update, c: ContextTypes.DEFAULT_TYPE):
     query = u.callback_query
@@ -558,10 +616,13 @@ async def async_main():
     app.add_handler(CommandHandler("stats",stats))
     app.add_handler(CommandHandler("about",about))
     app.add_handler(CommandHandler("premium",premium))
+    app.add_handler(CommandHandler("donate",donate))
     app.add_handler(MessageHandler(filters.VOICE,handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
     app.add_handler(CallbackQueryHandler(save_card, pattern="^save_card$"))
     app.add_handler(CallbackQueryHandler(buy_callback, pattern="^buy_"))
+    app.add_handler(CallbackQueryHandler(donate_show_callback, pattern="^donate$"))
+    app.add_handler(CallbackQueryHandler(donate_amount_callback, pattern="^donate_\\d+$"))
     app.add_handler(PreCheckoutQueryHandler(pre_checkout_handler))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
     app.add_handler(InlineQueryHandler(inline_query))
