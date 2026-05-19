@@ -1,12 +1,12 @@
 import logging, os, sys, io, random, tempfile, sqlite3, urllib.parse, asyncio
 from aiohttp import web
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 import numpy as np
 import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto, InlineQueryResultArticle, InputTextMessageContent
-from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto, InlineQueryResultArticle, InputTextMessageContent, LabeledPrice
+from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, CallbackQueryHandler, PreCheckoutQueryHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -94,18 +94,26 @@ CATS = [
 CATALOGUE = [{"id":c[0],"name":c[1],"title":c[2],"description":c[3],"element":c[4],"emoji":c[5],
               "acoustic":{"min_rms":c[6],"max_rms":c[7],"min_f0":c[8],"max_f0":c[9]}} for c in CATS]
 
-_share_data = {}
+LEGENDARY_IDS = {5, 9, 24, 29, 38, 52, 66, 70, 11, 48}
+LEGENDARY_CATS = [c for c in CATALOGUE if c['id'] in LEGENDARY_IDS]
 
-def classify_cat(rms, f0):
-    # Compute similarity for each cat
+_share_data = {}
+_last_analysis = {}
+_pending_action = {}
+
+def classify_cat(rms, f0, exclude_ids=None, pool=None):
+    candidates = pool or CATALOGUE
+    if exclude_ids:
+        candidates = [c for c in candidates if c['id'] not in exclude_ids]
+    if not candidates:
+        candidates = CATALOGUE
     similarities = []
-    for cat in CATALOGUE:
+    for cat in candidates:
         a = cat['acoustic']
         rms_range = a["max_rms"] - a["min_rms"]
         f0_range = a["max_f0"] - a["min_f0"]
         if rms_range < 1e-6: rms_range = 1e-6
         if f0_range < 1e-6: f0_range = 1e-6
-        # Compute how far outside the range each feature is (0 if inside)
         rms_outside = 0.0
         if rms < a["min_rms"]:
             rms_outside = (a["min_rms"] - rms) / rms_range
@@ -117,19 +125,16 @@ def classify_cat(rms, f0):
         elif f0 > a["max_f0"]:
             f0_outside = (f0 - a["max_f0"]) / f0_range
         dist = (rms_outside**2 + f0_outside**2) ** 0.5
-        # Convert distance to similarity: closer -> higher similarity
-        similarity = __import__('math').exp(-dist * 1.0)  # temperature = 1.0
+        similarity = __import__('math').exp(-dist * 1.0)
         similarities.append(similarity)
-    # Normalize to get probabilities
     total = sum(similarities)
     if total == 0:
-        probabilities = [1.0 / len(CATALOGUE)] * len(CATALOGUE)
+        probabilities = [1.0 / len(candidates)] * len(candidates)
     else:
         probabilities = [s / total for s in similarities]
-    # Sample a cat according to probabilities
     import random
-    chosen_index = random.choices(range(len(CATALOGUE)), weights=probabilities)[0]
-    return CATALOGUE[chosen_index]
+    chosen_index = random.choices(range(len(candidates)), weights=probabilities)[0]
+    return candidates[chosen_index]
 
 
 def analyze_audio_bytes(ogg_bytes):
@@ -162,7 +167,7 @@ EC = {"свет":(255,255,200),"тьма":(150,130,200),"огонь":(255,180,80
       "кристалл":(200,220,255)}
 SYMS = ["◇","○","△","☯","⟡","✧","∞","⚘","☽","𓋹","⟐","✳"]
 
-def gen_card(cat):
+def gen_card(cat, legendary=False):
     W,H=600,700;bg=random.choice(BG)
     img=Image.new("RGBA",(W,H),bg);d=ImageDraw.Draw(img)
     for _ in range(30):
@@ -188,6 +193,9 @@ def gen_card(cat):
     s=random.choice(SYMS);bb=d.textbbox((0,0),s,font=fn);d.text(((W-(bb[2]-bb[0]))//2,420),s,font=fn,fill=ec+(60,))
     t="🐾 Дух Леса указал на тебя 🐾";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,520),t,font=fs,fill=(255,255,255,150))
     t="t.me/Catgift_bot";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,570),t,font=fs,fill=(180,180,255,120))
+    if legendary:
+        d.rectangle([15,15,W-15,H-15],outline=(255,215,0,200),width=4)
+        t="👑 ЛЕГЕНДАРНЫЙ ТОТЕМ 👑";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,480),t,font=fs,fill=(255,215,0,200))
     t=f"✦ Тотем #{cat['id']} ✦";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,630),t,font=fs,fill=(150,150,180,90))
     buf=io.BytesIO();img.save(buf,format="PNG");return buf.getvalue()
 
@@ -198,12 +206,66 @@ def init_db():
         try:c.execute("ALTER TABLE readings ADD COLUMN file_id TEXT")
         except:pass
         c.execute("CREATE TABLE IF NOT EXISTS stats(id INTEGER PRIMARY KEY AUTOINCREMENT,total INTEGER DEFAULT 0,users INTEGER DEFAULT 0)")
+        c.execute("CREATE TABLE IF NOT EXISTS user_limits(user_id INTEGER PRIMARY KEY,daily_date TEXT,daily_count INTEGER DEFAULT 0,unlimited_until TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,payload TEXT,stars INTEGER,ts TEXT)")
 def record_reading(uid,cid,cname,fid):
     with sqlite3.connect(DB) as c:
         c.execute("INSERT INTO readings(user_id,cat_id,cat_name,file_id,ts) VALUES(?,?,?,?,?)",(uid,cid,cname,fid,datetime.now().isoformat()))
         c.execute("UPDATE stats SET total=COALESCE(total,0)+1 WHERE id=1")
         if c.rowcount==0:c.execute("INSERT INTO stats(id,total,users) VALUES(1,1,0)")
         c.execute("SELECT COUNT(DISTINCT user_id) FROM readings");c.execute("UPDATE stats SET users=? WHERE id=1",(c.fetchone()[0],))
+
+def _get_limit_info(user_id):
+    with sqlite3.connect(DB) as conn:
+        row = conn.execute("SELECT daily_date, daily_count, unlimited_until FROM user_limits WHERE user_id=?", (user_id,)).fetchone()
+        if row: return {"daily_date": row[0], "daily_count": row[1], "unlimited_until": row[2]}
+        return None
+
+def _can_read(user_id):
+    today = datetime.now().strftime("%Y-%m-%d")
+    info = _get_limit_info(user_id)
+    if info and info["unlimited_until"]:
+        try:
+            if datetime.fromisoformat(info["unlimited_until"]) > datetime.now():
+                return "premium"
+        except: pass
+    if info and info["daily_date"] == today and info["daily_count"] >= 3:
+        return "limit"
+    return "ok"
+
+def _use_reading(user_id):
+    today = datetime.now().strftime("%Y-%m-%d")
+    with sqlite3.connect(DB) as conn:
+        info = _get_limit_info(user_id)
+        if info:
+            if info["daily_date"] == today:
+                conn.execute("UPDATE user_limits SET daily_count=daily_count+1 WHERE user_id=?", (user_id,))
+            else:
+                conn.execute("UPDATE user_limits SET daily_date=?, daily_count=1 WHERE user_id=?", (today, user_id))
+        else:
+            conn.execute("INSERT INTO user_limits(user_id, daily_date, daily_count) VALUES(?,?,1)", (user_id, today))
+
+def _get_daily_remaining(user_id):
+    info = _get_limit_info(user_id)
+    if not info: return 3
+    if info["unlimited_until"]:
+        try:
+            if datetime.fromisoformat(info["unlimited_until"]) > datetime.now():
+                return float('inf')
+        except: pass
+    today = datetime.now().strftime("%Y-%m-%d")
+    if info["daily_date"] == today: return max(0, 3 - info["daily_count"])
+    return 3
+
+def _set_unlimited(user_id, days=30):
+    until = (datetime.now() + timedelta(days=days)).isoformat()
+    today = datetime.now().strftime("%Y-%m-%d")
+    with sqlite3.connect(DB) as conn:
+        conn.execute("INSERT OR REPLACE INTO user_limits(user_id, daily_date, daily_count, unlimited_until) VALUES(?,?,COALESCE((SELECT daily_count FROM user_limits WHERE user_id=?),0),?)", (user_id, today, user_id, until))
+
+def _record_payment(user_id, payload, stars):
+    with sqlite3.connect(DB) as conn:
+        conn.execute("INSERT INTO payments(user_id, payload, stars, ts) VALUES(?,?,?,?)", (user_id, payload, stars, datetime.now().isoformat()))
 
 async def start(u,c):
     await u.message.reply_text(
@@ -217,18 +279,47 @@ async def start(u,c):
     )
 
 async def handle_voice(u,c):
+    user_id = u.effective_user.id
     s=await u.message.reply_text("🌌 *Дух Леса внимает твоему зову...* 🌌",parse_mode="Markdown")
     try:
+        action = _pending_action.pop(user_id, None)
+        if action not in ("legendary", "reroll"):
+            status = _can_read(user_id)
+            if status == "limit":
+                remaining = _get_daily_remaining(user_id)
+                await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
+                await u.message.reply_text(
+                    f"🌫 *Лимит исчерпан* 🌫\n\nТы сегодня уже получил 3 тотема. Дух Леса устал.\n\n"
+                    f"✨ Открой безлимитный доступ всего за *1 Star*!",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⭐ Безлимит (1 Star)", callback_data="buy_unlimited")]])
+                )
+                return
+            _use_reading(user_id)
         vf=await u.message.voice.get_file();ob=await vf.download_as_bytearray()
         await c.bot.edit_message_text("🎵 Эхо разносится по лесу...",chat_id=u.effective_chat.id,message_id=s.message_id)
-        rms,f0=analyze_audio_bytes(ob);logger.info(f"User {u.effective_user.id}: rms={rms:.3f}, f0={f0:.1f}")
-        cat=classify_cat(rms,f0);logger.info(f"  → Тотем: {cat['name']}")
+        rms,f0=analyze_audio_bytes(ob);logger.info(f"User {user_id}: rms={rms:.3f}, f0={f0:.1f}")
+        if action == "reroll":
+            last = _last_analysis.get(user_id)
+            if last:
+                cat = classify_cat(rms, f0, exclude_ids={last['cat_id']})
+            else:
+                cat = classify_cat(rms, f0)
+            logger.info(f"  → Reroll тотем: {cat['name']}")
+        elif action == "legendary":
+            cat = classify_cat(rms, f0, pool=LEGENDARY_CATS)
+            logger.info(f"  → Легендарный тотем: {cat['name']}")
+        else:
+            cat=classify_cat(rms,f0);logger.info(f"  → Тотем: {cat['name']}")
+        _last_analysis[user_id] = {"rms": rms, "f0": f0, "cat_id": cat['id']}
+        legendary = action == "legendary"
         await c.bot.edit_message_text("🔮 Древние силы сплетают твою суть...",chat_id=u.effective_chat.id,message_id=s.message_id)
-        img=gen_card(cat)
+        img=gen_card(cat, legendary=legendary)
         await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
         await u.message.reply_voice(voice=u.message.voice.file_id, caption="🎧 *Твой голос услышан...*", parse_mode="Markdown")
-        caption=f"🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾"
-        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")],[InlineKeyboardButton("📢 Поделиться с друзьями", switch_inline_query=str(u.effective_user.id))]])
+        prefix = "👑 " if legendary else ""
+        caption=f"{prefix}🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾"
+        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")],[InlineKeyboardButton("📢 Поделиться с друзьями", switch_inline_query=str(user_id))]])
         image_path = None
         for ext in ("jpg", "jpeg", "png"):
             candidate = Path("image") / (str(cat['id']) + "." + ext)
@@ -241,9 +332,9 @@ async def handle_voice(u,c):
         else:
             sent=await u.message.reply_photo(photo=io.BytesIO(img), caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=120, read_timeout=120)
         fid = sent.photo[-1].file_id
-        try:record_reading(u.effective_user.id,cat['id'],cat['name'],fid)
+        try:record_reading(user_id,cat['id'],cat['name'],fid)
         except:pass
-        _share_data[u.effective_user.id] = {"file_id": fid, "cat": cat, "chat_id": u.effective_chat.id, "message_id": sent.message_id}
+        _share_data[user_id] = {"file_id": fid, "cat": cat, "chat_id": u.effective_chat.id, "message_id": sent.message_id}
     except Exception as e:
         logger.error(f"Ошибка: {e}",exc_info=True)
         try:await c.bot.edit_message_text("🌫 *Туман сгущается...* Попробуй ещё раз! 🐱\n\n_Подсказка: запиши голос подлиннее (3-5 секунд)_",chat_id=u.effective_chat.id,message_id=s.message_id,parse_mode="Markdown")
@@ -282,9 +373,108 @@ async def help_cmd(u,c):
         "3️⃣ Получи своего кота-тотема!\n"
         "4️⃣ Поделись с друзьями\n\n"
         "✨ *Каждый голос уникален — каждый тотем священен* ✨\n\n"
-        "Команды: /start /help /stats /about",
+        "Команды: /start /help /stats /about /premium",
         parse_mode="Markdown"
     )
+
+async def premium(u,c):
+    remaining = _get_daily_remaining(u.effective_user.id)
+    if remaining == float('inf'):
+        await u.message.reply_text(
+            "🌟 *У тебя уже есть Безлимитный доступ!* 🌟\n\n"
+            "Спасибо за поддержку Зачарованного Леса!\n\n"
+            "👑 Хочешь Легендарного кота? Открой /premium\n"
+            "🔄 Или перебрось тотем через /premium",
+            parse_mode="Markdown"
+        )
+        return
+    text = (
+        f"🌟 *Зачарованный Лес — Премиум* 🌟\n\n"
+        f"🐱 Бесплатных гаданий сегодня: *{remaining}*\n"
+        f"🎭 Открой все тайны Леса с Telegram Stars!\n\n"
+        f"⭐ *1 Star* — Безлимит на 30 дней ✨\n"
+        f"   Сними дневной лимит!\n\n"
+        f"⭐ *2 Stars* — Переброс тотема 🔄\n"
+        f"   Получи нового кота из своего голоса\n\n"
+        f"⭐ *3 Stars* — Легендарный кот 👑\n"
+        f"   Эксклюзивный тотем из высшей касты!\n\n"
+        f"🌲 *Дух Леса благодарит тебя за поддержку!*"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⭐ Безлимит (1 Star)", callback_data="buy_unlimited")],
+        [InlineKeyboardButton("🔄 Переброс (2 Stars)", callback_data="buy_reroll")],
+        [InlineKeyboardButton("👑 Легендарный (3 Stars)", callback_data="buy_legendary")],
+    ])
+    await u.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+
+async def buy_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    query = u.callback_query
+    await query.answer()
+    user_id = u.effective_user.id
+    payload = query.data
+    prices_map = {
+        "buy_unlimited": (1, "⭐ Безлимит на 30 дней"),
+        "buy_reroll": (2, "🔄 Переброс тотема"),
+        "buy_legendary": (3, "👑 Легендарный кот"),
+    }
+    if payload not in prices_map:
+        await query.edit_message_text("❌ Неизвестный товар")
+        return
+    if payload == "buy_reroll" and user_id not in _last_analysis:
+        await query.edit_message_text("❌ Сначала получи тотем! Отправь голосовое сообщение.")
+        return
+    stars, title = prices_map[payload]
+    await c.bot.send_invoice(
+        chat_id=user_id,
+        title=title,
+        description=f"Поддержка Зачарованного Леса ({stars} ⭐)",
+        payload=payload,
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label=title, amount=stars)],
+    )
+
+async def pre_checkout_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    query = u.pre_checkout_query
+    await query.answer(ok=True)
+
+async def successful_payment_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    user_id = u.effective_user.id
+    payload = u.message.successful_payment.invoice_payload
+    stars = u.message.successful_payment.total_amount
+    _record_payment(user_id, payload, stars)
+    if payload == "buy_unlimited":
+        _set_unlimited(user_id)
+        await u.message.reply_text(
+            "🌟 *Безлимитный доступ активирован на 30 дней!* 🌟\n\n"
+            "Дух Леса благодарит тебя! Теперь никаких ограничений.\n\n"
+            "Отправляй голосовые сколько хочешь! 🐾",
+            parse_mode="Markdown"
+        )
+    elif payload == "buy_reroll":
+        last = _last_analysis.get(user_id)
+        if last:
+            cat = classify_cat(last['rms'], last['f0'], exclude_ids={last['cat_id']})
+            _last_analysis[user_id] = {"rms": last['rms'], "f0": last['f0'], "cat_id": cat['id']}
+            img = gen_card(cat)
+            caption = f"🔄 *Переброс!* 🔄\n\n{cat['emoji']} {cat['title']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}"
+            sent = await u.message.reply_photo(photo=io.BytesIO(img), caption=caption, parse_mode="Markdown", write_timeout=120, read_timeout=120)
+            fid = sent.photo[-1].file_id
+            try: record_reading(user_id, cat['id'], cat['name'], fid)
+            except: pass
+            _share_data[user_id] = {"file_id": fid, "cat": cat, "chat_id": u.effective_chat.id, "message_id": sent.message_id}
+            await u.message.reply_text("🐾 *Твой новый тотем!* Поделись с друзьями!", parse_mode="Markdown")
+        else:
+            await u.message.reply_text("❌ Нет данных о голосе. Отправь голосовое и повтори попытку.")
+    elif payload == "buy_legendary":
+        _pending_action[user_id] = "legendary"
+        await u.message.reply_text(
+            "👑 *Легендарный кот активирован!* 👑\n\n"
+            "🎤 Отправь голосовое сообщение, и Дух Леса\n"
+            "выберет тебе *Легендарного кота* из высшей касты!\n\n"
+            "🐱 *Мяу-у-у...*",
+            parse_mode="Markdown"
+        )
 
 async def save_card(u: Update, c: ContextTypes.DEFAULT_TYPE):
     query = u.callback_query
@@ -367,9 +557,13 @@ async def async_main():
     app.add_handler(CommandHandler("help",help_cmd))
     app.add_handler(CommandHandler("stats",stats))
     app.add_handler(CommandHandler("about",about))
+    app.add_handler(CommandHandler("premium",premium))
     app.add_handler(MessageHandler(filters.VOICE,handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
     app.add_handler(CallbackQueryHandler(save_card, pattern="^save_card$"))
+    app.add_handler(CallbackQueryHandler(buy_callback, pattern="^buy_"))
+    app.add_handler(PreCheckoutQueryHandler(pre_checkout_handler))
+    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
     app.add_handler(InlineQueryHandler(inline_query))
     await app.initialize()
     await app.start()
