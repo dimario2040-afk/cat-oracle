@@ -227,7 +227,9 @@ async def handle_voice(u,c):
         await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
         await u.message.reply_voice(voice=u.message.voice.file_id, caption="🎧 *Твой голос услышан...*", parse_mode="Markdown")
         caption=f"🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾"
-        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")],[InlineKeyboardButton("🔗 Поделиться ботом", url="https://t.me/Catgift_bot")]])
+        share_msg = f"🐱 Я записал голос в @Catgift_bot и получил тотем «{cat['title']}»! Узнай своего — отправь голосовое боту!"
+        share_url = "https://t.me/share/url?url=" + urllib.parse.quote("https://t.me/Catgift_bot") + "&text=" + urllib.parse.quote(share_msg)
+        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")],[InlineKeyboardButton("📢 Поделиться с другом", url=share_url)]])
         sent=await u.message.reply_photo(photo=img, caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=60)
         fid = sent.photo[-1].file_id
         try:record_reading(u.effective_user.id,cat['id'],cat['name'],fid)
