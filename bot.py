@@ -95,7 +95,6 @@ CATALOGUE = [{"id":c[0],"name":c[1],"title":c[2],"description":c[3],"element":c[
               "acoustic":{"min_rms":c[6],"max_rms":c[7],"min_f0":c[8],"max_f0":c[9]}} for c in CATS]
 
 _share_data = {}
-_pending_share = {}
 
 def classify_cat(rms, f0):
     # Compute similarity for each cat
@@ -229,7 +228,7 @@ async def handle_voice(u,c):
         await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
         await u.message.reply_voice(voice=u.message.voice.file_id, caption="🎧 *Твой голос услышан...*", parse_mode="Markdown")
         caption=f"🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾"
-        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")],[InlineKeyboardButton("📢 Поделиться с друзьями", callback_data="share_card")]])
+        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")],[InlineKeyboardButton("📢 Поделиться с друзьями", switch_inline_query=str(u.effective_user.id))]])
         image_path = None
         for ext in ("jpg", "jpeg", "png"):
             candidate = Path("image") / (str(cat['id']) + "." + ext)
@@ -302,33 +301,6 @@ async def save_card(u: Update, c: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Save card error: {e}", exc_info=True)
         await query.answer("❌ Не удалось сохранить. Попробуй ещё раз.", show_alert=True)
 
-async def share_card(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    query = u.callback_query
-    await query.answer()
-    user_id = u.effective_user.id
-    data = _share_data.get(user_id)
-    if not data or "file_id" not in data or "cat" not in data:
-        await u.effective_message.reply_text("🌫 Карточка утеряна... Отправь голосовое заново!")
-        return
-    _pending_share[user_id] = data
-    await u.effective_message.reply_text("👤 Отправь @username друга, которому отправить карточку:")
-
-async def handle_share_target(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    user_id = u.effective_user.id
-    if user_id not in _pending_share:
-        return
-    data = _pending_share.pop(user_id)
-    target = u.message.text.strip()
-    caption = f"{u.effective_user.first_name} поделился с тобой тотемом «{data['cat']['title']}» 🐾\n\nhttps://t.me/Catgift_bot"
-    try:
-        await c.bot.send_photo(chat_id=target, photo=data["file_id"], caption=caption)
-        await u.message.reply_text("✅ Карточка отправлена другу!")
-        return True
-    except Exception as e:
-        logger.error(f"Share error: {e}", exc_info=True)
-        await u.message.reply_text("❌ Не удалось отправить. Проверь @username.")
-        return True
-
 def _get_user_cat(user_id):
     try:
         with sqlite3.connect(DB) as conn:
@@ -395,10 +367,8 @@ async def async_main():
     app.add_handler(CommandHandler("stats",stats))
     app.add_handler(CommandHandler("about",about))
     app.add_handler(MessageHandler(filters.VOICE,handle_voice))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_share_target))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
     app.add_handler(CallbackQueryHandler(save_card, pattern="^save_card$"))
-    app.add_handler(CallbackQueryHandler(share_card, pattern="^share_card$"))
     app.add_handler(InlineQueryHandler(inline_query))
     await app.initialize()
     await app.start()
