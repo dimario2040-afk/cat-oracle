@@ -299,9 +299,11 @@ def _get_user_cat(user_id):
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.inline_query.query
+    logger.info(f"Inline query from user {update.effective_user.id}: q={q!r}")
     try:
         user_id = int(q)
     except (ValueError, TypeError):
+        logger.info(f"Invalid inline query (not a user_id): {q!r}")
         await update.inline_query.answer([], cache_time=0, is_personal=True)
         return
     data = _share_data.get(user_id)
@@ -312,6 +314,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         share_text = f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/Catgift_bot"
     else:
         share_text = "🐱 Запиши голосовое боту @Catgift_bot и узнай свой тотем!"
+    logger.info(f"Inline: data={'yes' if data else 'no'}, db_cat={'yes' if db_cat else 'no'}, cat={'yes' if cat else 'no'}, file_id={'yes' if file_id else 'no'}")
     results = []
     if file_id:
         try:
@@ -330,7 +333,11 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🐱 Узнать своего кота!", url="https://t.me/Catgift_bot")
         ]])
     ))
-    await update.inline_query.answer(results, cache_time=0, is_personal=True)
+    logger.info(f"Inline answering with {len(results)} result(s)")
+    try:
+        await update.inline_query.answer(results, cache_time=0, is_personal=True)
+    except Exception as e:
+        logger.error(f"Inline answer error: {e}", exc_info=True)
 
 async def async_main():
     logger.info("🌿 Дух Леса пробуждается...")
