@@ -336,19 +336,22 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             results.append(InlineQueryResultCachedPhoto(
                 id="photo", photo_file_id=file_id, caption=share_text,
+                title=f"🐱 {cat['title']}",
+                description="Нажми, чтобы отправить карточку другу",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🐱 Узнать своего кота!", url="https://t.me/Catgift_bot")
                 ]])
             ))
         except Exception as e:
             logger.error(f"Inline photo error: {e}", exc_info=True)
-    results.append(InlineQueryResultArticle(
-        id="text", title="📢 Поделиться", description=share_text,
-        input_message_content=InputTextMessageContent(share_text, disable_web_page_preview=False),
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🐱 Узнать своего кота!", url="https://t.me/Catgift_bot")
-        ]])
-    ))
+    if not results:
+        results.append(InlineQueryResultArticle(
+            id="text", title="📢 Поделиться", description=share_text,
+            input_message_content=InputTextMessageContent(share_text, disable_web_page_preview=False),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🐱 Узнать своего кота!", url="https://t.me/Catgift_bot")
+            ]])
+        ))
     logger.info(f"Inline answering with {len(results)} result(s)")
     try:
         await update.inline_query.answer(results, cache_time=0, is_personal=True)
