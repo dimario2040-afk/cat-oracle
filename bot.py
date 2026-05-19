@@ -1,6 +1,5 @@
 import logging, os, sys, io, random, tempfile, sqlite3, urllib.parse, asyncio
 from aiohttp import web
-from pathlib import Path
 from datetime import datetime
 import numpy as np
 import soundfile as sf
@@ -229,17 +228,7 @@ async def handle_voice(u,c):
         await u.message.reply_voice(voice=u.message.voice.file_id, caption="🎧 *Твой голос услышан...*", parse_mode="Markdown")
         caption=f"🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾"
         share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")],[InlineKeyboardButton("🔗 Поделиться ботом", url="https://t.me/Catgift_bot")]])
-        image_path = None
-        for ext in ("jpg", "jpeg", "png"):
-            candidate = Path("image") / (str(cat['id']) + "." + ext)
-            if candidate.is_file():
-                image_path = candidate
-                break
-        if image_path is not None:
-            with open(image_path, "rb") as img_file:
-                sent=await u.message.reply_photo(photo=img_file, caption=caption, parse_mode=None, reply_markup=share_kb)
-        else:
-            sent=await u.message.reply_photo(photo=img, caption=caption, parse_mode=None, reply_markup=share_kb)
+        sent=await u.message.reply_photo(photo=img, caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=60)
         fid = sent.photo[-1].file_id
         try:record_reading(u.effective_user.id,cat['id'],cat['name'],fid)
         except:pass
@@ -365,7 +354,7 @@ async def async_main():
     PORT = int(os.environ.get("PORT", 10000))
     BASE = os.environ.get("RENDER_EXTERNAL_URL", "https://cat-oracle-3jeq.onrender.com")
     SECRET = os.environ.get("WEBHOOK_SECRET", "forest-whisper")
-    app = Application.builder().token(BOT_TOKEN).updater(None).request(HTTPXRequest(read_timeout=30, write_timeout=30, connect_timeout=15, pool_timeout=5)).build()
+    app = Application.builder().token(BOT_TOKEN).updater(None).request(HTTPXRequest(read_timeout=30, write_timeout=60, connect_timeout=30, pool_timeout=10)).build()
     app.add_handler(CommandHandler("start",start))
     app.add_handler(CommandHandler("help",help_cmd))
     app.add_handler(CommandHandler("stats",stats))
