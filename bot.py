@@ -230,7 +230,7 @@ async def handle_voice(u,c):
         caption=f"🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾"
         share_msg = f"🐱 Я получил тотем «{cat['title']}» в @Catgift_bot! Узнай свой — запиши голосовое 🐾\n\nhttps://t.me/Catgift_bot"
         share_url = "https://t.me/share/url?url=" + urllib.parse.quote("https://t.me/Catgift_bot") + "&text=" + urllib.parse.quote(share_msg)
-        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")],[InlineKeyboardButton("📢 Поделиться ссылкой", url=share_url)]])
+        share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")]])
         image_path = None
         for ext in ("jpg", "jpeg", "png"):
             candidate = Path("image") / (str(cat['id']) + "." + ext)
@@ -290,19 +290,19 @@ async def help_cmd(u,c):
 
 async def save_card(u: Update, c: ContextTypes.DEFAULT_TYPE):
     query = u.callback_query
-    await query.answer()
     user_id = u.effective_user.id
     data = _share_data.get(user_id)
     if not data or "chat_id" not in data or "message_id" not in data:
+        await query.answer()
         await query.edit_message_text("🌫 Карточка утеряна в тумане... Отправь голосовое заново!")
         return
     try:
-        await c.bot.copy_message(
-            chat_id=user_id,
-            from_chat_id=data["chat_id"],
-            message_id=data["message_id"]
-        )
-        await query.answer("✅ Карточка сохранена в Избранном! Оттуда можно переслать друзьям.", show_alert=True)
+        await c.bot.copy_message(chat_id=user_id, from_chat_id=data["chat_id"], message_id=data["message_id"])
+        share_msg = f"🐱 Я получил тотем «{data['cat']['title']}» в @Catgift_bot! Узнай свой — запиши голосовое 🐾\n\nhttps://t.me/Catgift_bot"
+        share_url = "https://t.me/share/url?url=" + urllib.parse.quote("https://t.me/Catgift_bot") + "&text=" + urllib.parse.quote(share_msg)
+        share_kb = InlineKeyboardMarkup([[InlineKeyboardButton("📢 Поделиться карточкой", url=share_url)]])
+        await c.bot.edit_message_reply_markup(chat_id=data["chat_id"], message_id=data["message_id"], reply_markup=share_kb)
+        await query.answer("✅ Сохранено! Теперь можно поделиться с друзьями.", show_alert=True)
     except Exception as e:
         logger.error(f"Save card error: {e}", exc_info=True)
         await query.answer("❌ Не удалось сохранить. Попробуй ещё раз.", show_alert=True)
