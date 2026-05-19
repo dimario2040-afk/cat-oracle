@@ -330,37 +330,18 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
     app.add_handler(InlineQueryHandler(inline_query))
     logger.info("🌿 Дух Леса взирает на мир... Запущен!")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
-
-import threading, http.server, os
-
-class HealthHandler(http.server.BaseHTTPRequestHandler):
-    def do_HEAD(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(b'Bot is alive')
-
-    def do_HEAD(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-
-def do_HEAD(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"Bot is alive")
-
-threading.Thread(target=lambda: http.server.HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 10000))), HealthHandler).serve_forever(), daemon=True).start()
+    PORT = int(os.environ.get("PORT", 10000))
+    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://cat-oracle-3jeq.onrender.com")
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=BOT_TOKEN,
+        webhook_url=f"{RENDER_URL}/{BOT_TOKEN}",
+        cert=None,
+        secret_token=None,
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+    )
 
 if __name__=="__main__":
     main()
