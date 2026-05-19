@@ -336,6 +336,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             results.append(InlineQueryResultCachedPhoto(
                 id="photo", photo_file_id=file_id, caption=share_text,
+                title=f"🐱 {cat['title']}",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🐱 Узнать своего кота!", url="https://t.me/Catgift_bot")
                 ]])
