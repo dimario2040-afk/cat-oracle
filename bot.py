@@ -1,10 +1,11 @@
-import logging, os, sys, io, random, tempfile, sqlite3, urllib.parse
+import logging, os, sys, io, random, tempfile, sqlite3, urllib.parse, time
 from pathlib import Path
 from datetime import datetime
 import numpy as np
 import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto, InlineQueryResultArticle, InputTextMessageContent
+from telegram.error import Conflict
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, filters, ContextTypes
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -344,16 +345,24 @@ def main():
     init_db()
     PORT = int(os.environ.get("PORT", 10000))
     threading.Thread(target=lambda: http.server.HTTPServer(("0.0.0.0", PORT), HealthHandler).serve_forever(), daemon=True).start()
-    app=Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start",start))
-    app.add_handler(CommandHandler("help",help_cmd))
-    app.add_handler(CommandHandler("stats",stats))
-    app.add_handler(CommandHandler("about",about))
-    app.add_handler(MessageHandler(filters.VOICE,handle_voice))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
-    app.add_handler(InlineQueryHandler(inline_query))
-    logger.info("🌿 Дух Леса взирает на мир... Запущен!")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    while True:
+        try:
+            app=Application.builder().token(BOT_TOKEN).build()
+            app.add_handler(CommandHandler("start",start))
+            app.add_handler(CommandHandler("help",help_cmd))
+            app.add_handler(CommandHandler("stats",stats))
+            app.add_handler(CommandHandler("about",about))
+            app.add_handler(MessageHandler(filters.VOICE,handle_voice))
+            app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
+            app.add_handler(InlineQueryHandler(inline_query))
+            logger.info("🌿 Дух Леса взирает на мир... Запущен!")
+            app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        except Conflict:
+            logger.warning("⚠️ 409 Conflict — другой экземпляр жив. Жду 10с...")
+            time.sleep(10)
+        except Exception as e:
+            logger.error(f"🔥 Ошибка: {e}", exc_info=True)
+            time.sleep(5)
 
 if __name__=="__main__":
     main()
