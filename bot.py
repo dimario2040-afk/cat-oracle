@@ -16,7 +16,7 @@ import os
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8827616686:AAFwdGgz5dkKEe_VbXvfHHecZk3Se0oOPek")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
 
-BOT_USERNAME = "Catgift_bot"  
+BOT_USERNAME = "catwood_bot"
 
 CATS = [
     (1,"Дух Света","Светозарный Кот","Твой голос прорезает тьму, как первый луч рассвета.","свет","✨",0,0.3,0,400),
@@ -192,7 +192,7 @@ def gen_card(cat, legendary=False):
     t=f"🌀 СТИХИЯ: {cat['element'].upper()}";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,350),t,font=fs,fill=ec+(180,))
     s=random.choice(SYMS);bb=d.textbbox((0,0),s,font=fn);d.text(((W-(bb[2]-bb[0]))//2,420),s,font=fn,fill=ec+(60,))
     t="🐾 Дух Леса указал на тебя 🐾";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,520),t,font=fs,fill=(255,255,255,150))
-    t="t.me/Catgift_bot";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,570),t,font=fs,fill=(180,180,255,120))
+    t=f"t.me/{BOT_USERNAME}";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,570),t,font=fs,fill=(180,180,255,120))
     if legendary:
         d.rectangle([15,15,W-15,H-15],outline=(255,215,0,200),width=4)
         t="👑 ЛЕГЕНДАРНЫЙ ТОТЕМ 👑";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,480),t,font=fs,fill=(255,215,0,200))
@@ -356,7 +356,7 @@ async def handle_voice(u,c):
         await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
         await u.message.reply_voice(voice=u.message.voice.file_id, caption="🎧 *Твой голос услышан...*", parse_mode="Markdown")
         prefix = "👑 " if legendary else ""
-        caption=f"{prefix}🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾\n\n👥 Приведи друга — получи +1 гадание: https://t.me/Catgift_bot?start=ref_{user_id}"
+        caption=f"{prefix}🌟 {cat['title']} 🌟\n\n{cat['emoji']} {cat['name']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}\n\nХочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! 🐾\n\n👥 Приведи друга — получи +1 гадание: https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
         share_kb=InlineKeyboardMarkup([[InlineKeyboardButton("📤 Сохранить в Избранное", callback_data="save_card")],[InlineKeyboardButton("📢 Поделиться с друзьями", switch_inline_query=str(user_id))]])
         image_path = None
         for ext in ("jpg", "jpeg", "png"):
@@ -613,9 +613,9 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cat = data["cat"] if data else (db_cat if db_cat else None)
     file_id = data.get("file_id") if data else (db_cat.get("file_id") if db_cat else None)
     if cat:
-        share_text = f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/Catgift_bot?start=ref_{user_id}"
+        share_text = f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
     else:
-        share_text = "🐱 Запиши голосовое боту @Catgift_bot и узнай свой тотем!"
+        share_text = f"🐱 Запиши голосовое боту @{BOT_USERNAME} и узнай свой тотем!"
     logger.info(f"Inline: data={'yes' if data else 'no'}, db_cat={'yes' if db_cat else 'no'}, cat={'yes' if cat else 'no'}, file_id={'yes' if file_id else 'no'}")
     results = []
     if file_id:
@@ -623,7 +623,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
             results.append(InlineQueryResultCachedPhoto(
                 id="photo", photo_file_id=file_id, caption=share_text,
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🐱 Узнать своего кота!", url="https://t.me/Catgift_bot")
+                    InlineKeyboardButton("🐱 Узнать своего кота!", url=f"https://t.me/{BOT_USERNAME}")
                 ]])
             ))
         except Exception as e:
@@ -633,7 +633,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
             id="text", title="📢 Поделиться", description=share_text,
             input_message_content=InputTextMessageContent(share_text, disable_web_page_preview=False),
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🐱 Узнать своего кота!", url="https://t.me/Catgift_bot")
+                InlineKeyboardButton("🐱 Узнать своего кота!", url=f"https://t.me/{BOT_USERNAME}")
             ]])
         ))
     logger.info(f"Inline answering with {len(results)} result(s)")
