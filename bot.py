@@ -220,8 +220,12 @@ def record_reading(uid,cid,cname,fid):
 
 def _get_limit_info(user_id):
     with sqlite3.connect(DB) as conn:
-        row = conn.execute("SELECT daily_date, daily_count, unlimited_until, bonus_readings FROM user_limits WHERE user_id=?", (user_id,)).fetchone()
-        if row: return {"daily_date": row[0], "daily_count": row[1], "unlimited_until": row[2], "bonus_readings": row[3] or 0}
+        try:
+            row = conn.execute("SELECT daily_date, daily_count, unlimited_until, bonus_readings FROM user_limits WHERE user_id=?", (user_id,)).fetchone()
+            if row: return {"daily_date": row[0], "daily_count": row[1], "unlimited_until": row[2], "bonus_readings": row[3] or 0}
+        except:
+            row = conn.execute("SELECT daily_date, daily_count, unlimited_until FROM user_limits WHERE user_id=?", (user_id,)).fetchone()
+            if row: return {"daily_date": row[0], "daily_count": row[1], "unlimited_until": row[2], "bonus_readings": 0}
         return None
 
 def _can_read(user_id):
@@ -282,8 +286,14 @@ def _record_payment(user_id, payload, stars):
         conn.execute("INSERT INTO payments(user_id, payload, stars, ts) VALUES(?,?,?,?)", (user_id, payload, stars, datetime.now().isoformat()))
 
 def _add_bonus(user_id, amount=1):
-    with sqlite3.connect(DB) as conn:
-        conn.execute("INSERT INTO user_limits(user_id,daily_date,daily_count,bonus_readings) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET bonus_readings=bonus_readings+?", (user_id, datetime.now().strftime("%Y-%m-%d"), 0, amount, amount))
+    try:
+        with sqlite3.connect(DB) as conn:
+            conn.execute("INSERT INTO user_limits(user_id,daily_date,daily_count,bonus_readings) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET bonus_readings=bonus_readings+?", (user_id, datetime.now().strftime("%Y-%m-%d"), 0, amount, amount))
+    except:
+        try:
+            with sqlite3.connect(DB) as conn:
+                conn.execute("INSERT OR IGNORE INTO user_limits(user_id,daily_date,daily_count) VALUES(?,?,0)", (user_id, datetime.now().strftime("%Y-%m-%d")))
+        except: pass
 
 async def start(u,c):
     args = c.args
