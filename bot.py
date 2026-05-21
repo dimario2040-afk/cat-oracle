@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto, InlineQueryResultArticle, InputTextMessageContent, LabeledPrice
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto, InlineQueryResultCachedVoice, InlineQueryResultArticle, InputTextMessageContent, LabeledPrice
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, CallbackQueryHandler, PreCheckoutQueryHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
@@ -501,7 +501,7 @@ async def successful_payment_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
             fid = sent.photo[-1].file_id
             try: record_reading(user_id, cat['id'], cat['name'], fid)
             except: pass
-            _share_data[user_id] = {"file_id": fid, "cat": cat, "chat_id": u.effective_chat.id, "message_id": sent.message_id}
+            _share_data[user_id] = {"file_id": fid, "voice_file_id": u.message.voice.file_id, "cat": cat, "chat_id": u.effective_chat.id, "message_id": sent.message_id}
             await u.message.reply_text("🐾 *Твой новый тотем!* Поделись с друзьями!", parse_mode="Markdown")
         else:
             await u.message.reply_text("❌ Нет данных о голосе. Отправь голосовое и повтори попытку.")
@@ -612,6 +612,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_cat = _get_user_cat(user_id) if not data else None
     cat = data["cat"] if data else (db_cat if db_cat else None)
     file_id = data.get("file_id") if data else (db_cat.get("file_id") if db_cat else None)
+    voice_file_id = data.get("voice_file_id") if data else None
     if cat:
         share_text = f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['title']}»! А кто ты? https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
     else:
@@ -628,6 +629,18 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ))
         except Exception as e:
             logger.error(f"Inline photo error: {e}", exc_info=True)
+    if voice_file_id and cat:
+        voice_title = f"🎤 {cat['emoji']} {cat['title']}"
+        voice_caption = f"🎧 Слушай мой тотем! Я — {cat['emoji']} {cat['title']}\n\nУзнай своего: t.me/{BOT_USERNAME}"
+        try:
+            results.append(InlineQueryResultCachedVoice(
+                id="voice", voice_file_id=voice_file_id, title=voice_title, caption=voice_caption,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🐱 Узнать своего кота!", url=f"https://t.me/{BOT_USERNAME}")
+                ]])
+            ))
+        except Exception as e:
+            logger.error(f"Inline voice error: {e}", exc_info=True)
     if not results:
         results.append(InlineQueryResultArticle(
             id="text", title="📢 Поделиться", description=share_text,
