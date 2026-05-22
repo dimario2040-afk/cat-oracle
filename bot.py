@@ -200,10 +200,16 @@ def gen_card(cat, legendary=False):
     buf=io.BytesIO();img.save(buf,format="PNG");return buf.getvalue()
 
 FFMPEG_PATH = "./ffmpeg" if os.path.exists("./ffmpeg") else "ffmpeg"
-_ffmpeg_semaphore = asyncio.Semaphore(2)
+_ffmpeg_semaphore = None
+
+def _get_ffmpeg_semaphore():
+    global _ffmpeg_semaphore
+    if _ffmpeg_semaphore is None:
+        _ffmpeg_semaphore = asyncio.Semaphore(2)
+    return _ffmpeg_semaphore
 
 async def gen_video(image_bytes, voice_ogg_bytes, totem_name, max_duration=15):
-    async with _ffmpeg_semaphore:
+    async with _get_ffmpeg_semaphore():
         tmp = tempfile.mkdtemp()
         img_path = os.path.join(tmp, "totem.png")
         voice_path = os.path.join(tmp, "voice.ogg")
@@ -211,6 +217,7 @@ async def gen_video(image_bytes, voice_ogg_bytes, totem_name, max_duration=15):
         try:
             with open(img_path, "wb") as f: f.write(image_bytes)
             with open(voice_path, "wb") as f: f.write(voice_ogg_bytes)
+            logger.info(f"gen_video: starting ffmpeg ({FFMPEG_PATH}) for {totem_name}")
             proc = await asyncio.create_subprocess_exec(
                 FFMPEG_PATH, "-y",
                 "-loop", "1",
@@ -229,10 +236,14 @@ async def gen_video(image_bytes, voice_ogg_bytes, totem_name, max_duration=15):
             )
             await asyncio.wait_for(proc.wait(), timeout=60)
             if proc.returncode != 0:
+                logger.error(f"gen_video: ffmpeg returncode={proc.returncode}")
                 return None
             with open(out_path, "rb") as f:
-                return f.read()
+                data = f.read()
+            logger.info(f"gen_video: OK ({len(data)} bytes)")
+            return data
         except asyncio.TimeoutError:
+            logger.error("gen_video: ffmpeg timed out")
             return None
         except Exception as e:
             logger.error(f"gen_video error: {e}")
@@ -249,6 +260,7 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
     try:
         mp4 = await gen_video(img_data, voice_data, cat['title'])
         if not mp4:
+            logger.warning(f"_send_totem_video: gen_video returned None for user {user_id}")
             return
         caption = (
             f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['name']}»!"
@@ -262,8 +274,9 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
             reply_to_message_id=reply_to,
             write_timeout=120, read_timeout=120,
         )
+        logger.info(f"_send_totem_video: sent to user {user_id}")
     except Exception as e:
-        logger.error(f"_send_totem_video: {e}")
+        logger.error(f"_send_totem_video error: {e}")
 
 DB=os.path.join(os.path.dirname(__file__),"sanctuary.db")
 def init_db():
