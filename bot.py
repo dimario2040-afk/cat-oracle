@@ -199,6 +199,67 @@ def gen_card(cat, legendary=False):
     t=f"✦ Тотем #{cat['id']} ✦";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,630),t,font=fs,fill=(150,150,180,90))
     buf=io.BytesIO();img.save(buf,format="PNG");return buf.getvalue()
 
+FFMPEG_PATH = "./ffmpeg" if os.path.exists("./ffmpeg") else "ffmpeg"
+
+async def gen_video(image_bytes, voice_ogg_bytes, totem_name, max_duration=30):
+    tmp = tempfile.mkdtemp()
+    img_path = os.path.join(tmp, "totem.png")
+    voice_path = os.path.join(tmp, "voice.ogg")
+    out_path = os.path.join(tmp, "out.mp4")
+    try:
+        with open(img_path, "wb") as f: f.write(image_bytes)
+        with open(voice_path, "wb") as f: f.write(voice_ogg_bytes)
+        proc = await asyncio.create_subprocess_exec(
+            FFMPEG_PATH, "-y",
+            "-loop", "1",
+            "-i", img_path,
+            "-i", voice_path,
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+            "-c:a", "aac", "-b:a", "128k",
+            "-t", str(max_duration),
+            "-shortest",
+            "-movflags", "+faststart",
+            out_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=120)
+        if proc.returncode != 0:
+            logger.error(f"ffmpeg error: returncode={proc.returncode}")
+            return None
+        with open(out_path, "rb") as f:
+            return f.read()
+    except asyncio.TimeoutError:
+        logger.error("ffmpeg timed out")
+        return None
+    except Exception as e:
+        logger.error(f"gen_video error: {e}")
+        return None
+    finally:
+        try:
+            for f in os.listdir(tmp):
+                os.remove(os.path.join(tmp, f))
+            os.rmdir(tmp)
+        except:
+            pass
+
+async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to):
+    try:
+        mp4 = await gen_video(img_data, voice_data, cat['title'])
+        if not mp4:
+            return
+        await c.bot.send_video(
+            chat_id=chat_id,
+            video=io.BytesIO(mp4),
+            caption=f"🎬 {cat['emoji']} {cat['name']} — {cat['title']}",
+            reply_to_message_id=reply_to,
+            write_timeout=120, read_timeout=120,
+        )
+    except Exception as e:
+        logger.error(f"_send_totem_video: {e}")
+
 DB=os.path.join(os.path.dirname(__file__),"sanctuary.db")
 def init_db():
     with sqlite3.connect(DB) as c:
@@ -373,13 +434,17 @@ async def handle_voice(u,c):
                 break
         if image_path is not None:
             with open(image_path, "rb") as img_file:
-                sent=await u.message.reply_photo(photo=img_file, caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=120, read_timeout=120)
+                img_data = img_file.read()
+                sent=await u.message.reply_photo(photo=io.BytesIO(img_data), caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=120, read_timeout=120)
         else:
-            sent=await u.message.reply_photo(photo=io.BytesIO(img), caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=120, read_timeout=120)
+            img_data = img
+            sent=await u.message.reply_photo(photo=io.BytesIO(img_data), caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=120, read_timeout=120)
         fid = sent.photo[-1].file_id
         try:record_reading(user_id,cat['id'],cat['name'],fid)
         except:pass
         _share_data[user_id] = {"file_id": fid, "cat": cat, "chat_id": u.effective_chat.id, "message_id": sent.message_id}
+        if ob:
+            asyncio.create_task(_send_totem_video(c, u.effective_chat.id, img_data, ob, cat, sent.message_id))
     except Exception as e:
         logger.error(f"Ошибка: {e}",exc_info=True)
         try:await c.bot.edit_message_text("🌫 *Туман сгущается...* Попробуй ещё раз! 🐱\n\n_Подсказка: запиши голос подлиннее (3-5 секунд)_",chat_id=u.effective_chat.id,message_id=s.message_id,parse_mode="Markdown")
