@@ -214,11 +214,11 @@ def init_db():
         c.execute("CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,payload TEXT,stars INTEGER,ts TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS referrals(id INTEGER PRIMARY KEY AUTOINCREMENT,referrer_id INTEGER,referee_id INTEGER,ts TEXT)")
 def record_reading(uid,cid,cname,fid):
-    with sqlite3.connect(DB) as c:
-        c.execute("INSERT INTO readings(user_id,cat_id,cat_name,file_id,ts) VALUES(?,?,?,?,?)",(uid,cid,cname,fid,datetime.now().isoformat()))
-        c.execute("UPDATE stats SET total=COALESCE(total,0)+1 WHERE id=1")
-        if c.rowcount==0:c.execute("INSERT INTO stats(id,total,users) VALUES(1,1,0)")
-        c.execute("SELECT COUNT(DISTINCT user_id) FROM readings");c.execute("UPDATE stats SET users=? WHERE id=1",(c.fetchone()[0],))
+    with sqlite3.connect(DB) as conn:
+        conn.execute("INSERT INTO readings(user_id,cat_id,cat_name,file_id,ts) VALUES(?,?,?,?,?)",(uid,cid,cname,fid,datetime.now().isoformat()))
+        cur=conn.execute("UPDATE stats SET total=COALESCE(total,0)+1 WHERE id=1")
+        if cur.rowcount==0:conn.execute("INSERT INTO stats(id,total,users) VALUES(1,1,0)")
+        users=conn.execute("SELECT COUNT(DISTINCT user_id) FROM readings").fetchone()[0];conn.execute("UPDATE stats SET users=? WHERE id=1",(users,))
 def record_start():
     with sqlite3.connect(DB) as conn:
         cur=conn.execute("UPDATE stats SET starts=COALESCE(starts,0)+1 WHERE id=1")
