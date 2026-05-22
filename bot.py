@@ -256,11 +256,14 @@ async def gen_video(image_bytes, voice_ogg_bytes, totem_name, max_duration=15):
             except:
                 pass
 
-async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, user_id):
+async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, user_id, prog_msg_id=None):
     try:
         mp4 = await gen_video(img_data, voice_data, cat['title'])
         if not mp4:
             logger.warning(f"_send_totem_video: gen_video returned None for user {user_id}")
+            if prog_msg_id:
+                try: await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
+                except: pass
             return
         caption = (
             f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['name']}»!"
@@ -274,9 +277,15 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
             reply_to_message_id=reply_to,
             write_timeout=120, read_timeout=120,
         )
+        if prog_msg_id:
+            try: await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
+            except: pass
         logger.info(f"_send_totem_video: sent to user {user_id}")
     except Exception as e:
         logger.error(f"_send_totem_video error: {e}")
+        if prog_msg_id:
+            try: await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
+            except: pass
 
 DB=os.path.join(os.path.dirname(__file__),"sanctuary.db")
 def init_db():
@@ -462,7 +471,8 @@ async def handle_voice(u,c):
         except:pass
         _share_data[user_id] = {"file_id": fid, "cat": cat, "chat_id": u.effective_chat.id, "message_id": sent.message_id}
         if ob:
-            asyncio.create_task(_send_totem_video(c, u.effective_chat.id, img_data, ob, cat, sent.message_id, user_id))
+            prog_msg = await c.bot.send_message(chat_id=u.effective_chat.id, text="🎥 *Готовлю видео...*", parse_mode="Markdown")
+            asyncio.create_task(_send_totem_video(c, u.effective_chat.id, img_data, ob, cat, sent.message_id, user_id, prog_msg.message_id))
     except Exception as e:
         logger.error(f"Ошибка: {e}",exc_info=True)
         try:await c.bot.edit_message_text("🌫 *Туман сгущается...* Попробуй ещё раз! 🐱\n\n_Подсказка: запиши голос подлиннее (3-5 секунд)_",chat_id=u.effective_chat.id,message_id=s.message_id,parse_mode="Markdown")
