@@ -487,8 +487,10 @@ async def stats(u,c):
         st=row[0] if row else 0
         rd=conn.execute("SELECT COUNT(*) FROM readings WHERE ts>=datetime('now','-1 day')").fetchone()[0]
         rw=conn.execute("SELECT COUNT(*) FROM readings WHERE ts>=datetime('now','-7 days')").fetchone()[0]
-        stars=conn.execute("SELECT COALESCE(SUM(stars),0) FROM payments").fetchone()[0]
-        refs=conn.execute("SELECT COUNT(*) FROM referrals").fetchone()[0]
+        try:stars=conn.execute("SELECT COALESCE(SUM(stars),0) FROM payments").fetchone()[0]
+        except:stars=0
+        try:refs=conn.execute("SELECT COUNT(*) FROM referrals").fetchone()[0]
+        except:refs=0
         top=conn.execute("SELECT cat_name, COUNT(*) as cnt FROM readings GROUP BY cat_name ORDER BY cnt DESC LIMIT 5").fetchall()
     msg=(
         f"🌿 *Святилище Кошачьего Духа* 🌿\n\n"
