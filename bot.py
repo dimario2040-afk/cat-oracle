@@ -220,9 +220,9 @@ def record_reading(uid,cid,cname,fid):
         if c.rowcount==0:c.execute("INSERT INTO stats(id,total,users) VALUES(1,1,0)")
         c.execute("SELECT COUNT(DISTINCT user_id) FROM readings");c.execute("UPDATE stats SET users=? WHERE id=1",(c.fetchone()[0],))
 def record_start():
-    with sqlite3.connect(DB) as c:
-        c.execute("UPDATE stats SET starts=COALESCE(starts,0)+1 WHERE id=1")
-        if c.rowcount==0:c.execute("INSERT INTO stats(id,total,users,starts) VALUES(1,0,0,1)")
+    with sqlite3.connect(DB) as conn:
+        cur=conn.execute("UPDATE stats SET starts=COALESCE(starts,0)+1 WHERE id=1")
+        if cur.rowcount==0:conn.execute("INSERT INTO stats(id,total,users,starts) VALUES(1,0,0,1)")
 
 def _get_limit_info(user_id):
     with sqlite3.connect(DB) as conn:
@@ -390,7 +390,8 @@ async def stats(u,c):
     with sqlite3.connect(DB) as conn:
         t=conn.execute("SELECT COUNT(*) FROM readings").fetchone()[0]
         us=conn.execute("SELECT COUNT(DISTINCT user_id) FROM readings").fetchone()[0]
-        st=conn.execute("SELECT COALESCE(starts,0) FROM stats WHERE id=1").fetchone()[0]
+        row=conn.execute("SELECT starts FROM stats WHERE id=1").fetchone()
+        st=row[0] if row else 0
         rd=conn.execute("SELECT COUNT(*) FROM readings WHERE ts>=datetime('now','-1 day')").fetchone()[0]
         rw=conn.execute("SELECT COUNT(*) FROM readings WHERE ts>=datetime('now','-7 days')").fetchone()[0]
         stars=conn.execute("SELECT COALESCE(SUM(stars),0) FROM payments").fetchone()[0]
