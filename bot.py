@@ -245,15 +245,20 @@ async def gen_video(image_bytes, voice_ogg_bytes, totem_name, max_duration=15):
             except:
                 pass
 
-async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to):
+async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, user_id):
     try:
         mp4 = await gen_video(img_data, voice_data, cat['title'])
         if not mp4:
             return
+        caption = (
+            f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['name']}»!"
+            f"\nА кто ты?\n"
+            f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
+        )
         await c.bot.send_video(
             chat_id=chat_id,
             video=io.BytesIO(mp4),
-            caption=f"🎬 {cat['emoji']} {cat['name']} — {cat['title']}",
+            caption=caption,
             reply_to_message_id=reply_to,
             write_timeout=120, read_timeout=120,
         )
@@ -444,7 +449,7 @@ async def handle_voice(u,c):
         except:pass
         _share_data[user_id] = {"file_id": fid, "cat": cat, "chat_id": u.effective_chat.id, "message_id": sent.message_id}
         if ob:
-            asyncio.create_task(_send_totem_video(c, u.effective_chat.id, img_data, ob, cat, sent.message_id))
+            asyncio.create_task(_send_totem_video(c, u.effective_chat.id, img_data, ob, cat, sent.message_id, user_id))
     except Exception as e:
         logger.error(f"Ошибка: {e}",exc_info=True)
         try:await c.bot.edit_message_text("🌫 *Туман сгущается...* Попробуй ещё раз! 🐱\n\n_Подсказка: запиши голос подлиннее (3-5 секунд)_",chat_id=u.effective_chat.id,message_id=s.message_id,parse_mode="Markdown")
