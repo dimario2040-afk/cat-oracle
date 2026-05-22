@@ -200,50 +200,50 @@ def gen_card(cat, legendary=False):
     buf=io.BytesIO();img.save(buf,format="PNG");return buf.getvalue()
 
 FFMPEG_PATH = "./ffmpeg" if os.path.exists("./ffmpeg") else "ffmpeg"
+_ffmpeg_semaphore = asyncio.Semaphore(2)
 
-async def gen_video(image_bytes, voice_ogg_bytes, totem_name, max_duration=30):
-    tmp = tempfile.mkdtemp()
-    img_path = os.path.join(tmp, "totem.png")
-    voice_path = os.path.join(tmp, "voice.ogg")
-    out_path = os.path.join(tmp, "out.mp4")
-    try:
-        with open(img_path, "wb") as f: f.write(image_bytes)
-        with open(voice_path, "wb") as f: f.write(voice_ogg_bytes)
-        proc = await asyncio.create_subprocess_exec(
-            FFMPEG_PATH, "-y",
-            "-loop", "1",
-            "-i", img_path,
-            "-i", voice_path,
-            "-c:v", "libx264",
-            "-pix_fmt", "yuv420p",
-            "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
-            "-c:a", "aac", "-b:a", "128k",
-            "-t", str(max_duration),
-            "-shortest",
-            "-movflags", "+faststart",
-            out_path,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await asyncio.wait_for(proc.wait(), timeout=120)
-        if proc.returncode != 0:
-            logger.error(f"ffmpeg error: returncode={proc.returncode}")
-            return None
-        with open(out_path, "rb") as f:
-            return f.read()
-    except asyncio.TimeoutError:
-        logger.error("ffmpeg timed out")
-        return None
-    except Exception as e:
-        logger.error(f"gen_video error: {e}")
-        return None
-    finally:
+async def gen_video(image_bytes, voice_ogg_bytes, totem_name, max_duration=15):
+    async with _ffmpeg_semaphore:
+        tmp = tempfile.mkdtemp()
+        img_path = os.path.join(tmp, "totem.png")
+        voice_path = os.path.join(tmp, "voice.ogg")
+        out_path = os.path.join(tmp, "out.mp4")
         try:
-            for f in os.listdir(tmp):
-                os.remove(os.path.join(tmp, f))
-            os.rmdir(tmp)
-        except:
-            pass
+            with open(img_path, "wb") as f: f.write(image_bytes)
+            with open(voice_path, "wb") as f: f.write(voice_ogg_bytes)
+            proc = await asyncio.create_subprocess_exec(
+                FFMPEG_PATH, "-y",
+                "-loop", "1",
+                "-i", img_path,
+                "-i", voice_path,
+                "-c:v", "libx264", "-preset", "ultrafast",
+                "-pix_fmt", "yuv420p",
+                "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2",
+                "-c:a", "aac", "-b:a", "96k",
+                "-t", str(max_duration),
+                "-shortest",
+                "-movflags", "+faststart",
+                out_path,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=60)
+            if proc.returncode != 0:
+                return None
+            with open(out_path, "rb") as f:
+                return f.read()
+        except asyncio.TimeoutError:
+            return None
+        except Exception as e:
+            logger.error(f"gen_video error: {e}")
+            return None
+        finally:
+            try:
+                for f in os.listdir(tmp):
+                    os.remove(os.path.join(tmp, f))
+                os.rmdir(tmp)
+            except:
+                pass
 
 async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to):
     try:
