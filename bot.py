@@ -205,7 +205,9 @@ def init_db():
         c.execute("CREATE TABLE IF NOT EXISTS readings(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,cat_id INTEGER,cat_name TEXT,file_id TEXT,ts TEXT)")
         try:c.execute("ALTER TABLE readings ADD COLUMN file_id TEXT")
         except:pass
-        c.execute("CREATE TABLE IF NOT EXISTS stats(id INTEGER PRIMARY KEY AUTOINCREMENT,total INTEGER DEFAULT 0,users INTEGER DEFAULT 0)")
+        c.execute("CREATE TABLE IF NOT EXISTS stats(id INTEGER PRIMARY KEY AUTOINCREMENT,total INTEGER DEFAULT 0,users INTEGER DEFAULT 0,starts INTEGER DEFAULT 0)")
+        try: c.execute("ALTER TABLE stats ADD COLUMN starts INTEGER DEFAULT 0")
+        except: pass
         c.execute("CREATE TABLE IF NOT EXISTS user_limits(user_id INTEGER PRIMARY KEY,daily_date TEXT,daily_count INTEGER DEFAULT 0,unlimited_until TEXT,bonus_readings INTEGER DEFAULT 0)")
         try: c.execute("ALTER TABLE user_limits ADD COLUMN bonus_readings INTEGER DEFAULT 0")
         except: pass
@@ -217,6 +219,10 @@ def record_reading(uid,cid,cname,fid):
         c.execute("UPDATE stats SET total=COALESCE(total,0)+1 WHERE id=1")
         if c.rowcount==0:c.execute("INSERT INTO stats(id,total,users) VALUES(1,1,0)")
         c.execute("SELECT COUNT(DISTINCT user_id) FROM readings");c.execute("UPDATE stats SET users=? WHERE id=1",(c.fetchone()[0],))
+def record_start():
+    with sqlite3.connect(DB) as c:
+        c.execute("UPDATE stats SET starts=COALESCE(starts,0)+1 WHERE id=1")
+        if c.rowcount==0:c.execute("INSERT INTO stats(id,total,users,starts) VALUES(1,0,0,1)")
 
 def _get_limit_info(user_id):
     with sqlite3.connect(DB) as conn:
@@ -296,6 +302,7 @@ def _add_bonus(user_id, amount=1):
         except: pass
 
 async def start(u,c):
+    record_start()
     args = c.args
     if args and args[0].startswith("ref_"):
         referrer_id = int(args[0][4:])
@@ -383,8 +390,21 @@ async def stats(u,c):
     with sqlite3.connect(DB) as conn:
         t=conn.execute("SELECT COUNT(*) FROM readings").fetchone()[0]
         us=conn.execute("SELECT COUNT(DISTINCT user_id) FROM readings").fetchone()[0]
+        st=conn.execute("SELECT COALESCE(starts,0) FROM stats WHERE id=1").fetchone()[0]
+        rd=conn.execute("SELECT COUNT(*) FROM readings WHERE ts>=datetime('now','-1 day')").fetchone()[0]
+        rw=conn.execute("SELECT COUNT(*) FROM readings WHERE ts>=datetime('now','-7 days')").fetchone()[0]
+        stars=conn.execute("SELECT COALESCE(SUM(stars),0) FROM payments").fetchone()[0]
+        refs=conn.execute("SELECT COUNT(*) FROM referrals").fetchone()[0]
         top=conn.execute("SELECT cat_name, COUNT(*) as cnt FROM readings GROUP BY cat_name ORDER BY cnt DESC LIMIT 5").fetchall()
-    msg=f"🌿 *Статистика Святилища* 🌿\n\n🐱 Тотемов раскрыто: *{t}*\n🙏 Странников: *{us}*"
+    msg=(
+        f"🌿 *Святилище Кошачьего Духа* 🌿\n\n"
+        f"👣 Заходов: *{st}*\n"
+        f"🐱 Тотемов раскрыто: *{t}*\n"
+        f"🙏 Странников: *{us}*\n"
+        f"📊 За сутки: *{rd}* | За неделю: *{rw}*\n"
+        f"⭐ Stars заработано: *{stars}*\n"
+        f"🔗 Рефералов: *{refs}*"
+    )
     if top:msg+="\n\n*Топ-5 тотемов:*\n"+("\n".join(f"  • {n}: {cnt}" for n,cnt in top))
     msg+="\n\n_Дух Леса доволен._"
     await u.message.reply_text(msg,parse_mode="Markdown")
