@@ -200,8 +200,17 @@ def gen_card(cat, legendary=False):
     t=f"✦ Тотем #{cat['id']} ✦";bb=d.textbbox((0,0),t,font=fs);d.text(((W-(bb[2]-bb[0]))//2,630),t,font=fs,fill=(150,150,180,90))
     buf=io.BytesIO();img.save(buf,format="PNG");return buf.getvalue()
 
-FFMPEG_PATH = "./ffmpeg" if os.path.exists("./ffmpeg") else "ffmpeg"
 _ffmpeg_semaphore = None
+
+def _get_ffmpeg_path():
+    candidates = ["./ffmpeg", "ffmpeg", "/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    # last resort — trust PATH
+    return "ffmpeg"
+
+FFMPEG_PATH = _get_ffmpeg_path()
 
 def _get_ffmpeg_semaphore():
     global _ffmpeg_semaphore
@@ -233,11 +242,12 @@ async def gen_video(image_bytes, voice_ogg_bytes, totem_name, max_duration=15):
                 "-movflags", "+faststart",
                 out_path,
                 stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
             )
-            await asyncio.wait_for(proc.wait(), timeout=60)
+            _, stderr_data = await asyncio.wait_for(proc.communicate(), timeout=60)
             if proc.returncode != 0:
-                logger.error(f"gen_video: ffmpeg returncode={proc.returncode}")
+                stderr_text = stderr_data.decode("utf-8", errors="replace")[-500:]
+                logger.error(f"gen_video: ffmpeg returncode={proc.returncode} stderr={stderr_text}")
                 return None
             with open(out_path, "rb") as f:
                 data = f.read()
@@ -245,6 +255,9 @@ async def gen_video(image_bytes, voice_ogg_bytes, totem_name, max_duration=15):
             return data
         except asyncio.TimeoutError:
             logger.error("gen_video: ffmpeg timed out")
+            return None
+        except FileNotFoundError:
+            logger.error(f"gen_video: ffmpeg NOT FOUND at {FFMPEG_PATH}")
             return None
         except Exception as e:
             logger.error(f"gen_video error: {e}")
@@ -263,8 +276,14 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
         if not mp4:
             logger.warning(f"_send_totem_video: gen_video returned None for user {user_id}")
             if prog_msg_id:
-                try: await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
-                except: pass
+                try:
+                    await c.bot.edit_message_text(
+                        chat_id=chat_id, message_id=prog_msg_id,
+                        text="😿 *Дух Леса не смог создать видео...*\nНо тотем уже твой!",
+                        parse_mode="Markdown",
+                    )
+                except:
+                    await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
             return
         caption = (
             f"🐱 Я записал голос и Дух Леса показал, что я — «{cat['name']}»!"
@@ -285,8 +304,15 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
     except Exception as e:
         logger.error(f"_send_totem_video error: {e}")
         if prog_msg_id:
-            try: await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
-            except: pass
+            try:
+                await c.bot.edit_message_text(
+                    chat_id=chat_id, message_id=prog_msg_id,
+                    text="😿 *Дух Леса не смог создать видео...*\nНо тотем уже твой!",
+                    parse_mode="Markdown",
+                )
+            except:
+                try: await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
+                except: pass
 
 DB_POOL = None
 
