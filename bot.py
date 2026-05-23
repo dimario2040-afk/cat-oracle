@@ -1,4 +1,5 @@
-import logging, os, sys, io, random, tempfile, sqlite3, urllib.parse, asyncio
+import logging, os, sys, io, random, tempfile, urllib.parse, asyncio
+import asyncpg
 from aiohttp import web
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -287,44 +288,80 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
             try: await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
             except: pass
 
-DB=os.path.join(os.path.dirname(__file__),"sanctuary.db")
-def init_db():
-    with sqlite3.connect(DB) as c:
-        c.execute("CREATE TABLE IF NOT EXISTS readings(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,cat_id INTEGER,cat_name TEXT,file_id TEXT,ts TEXT)")
-        try:c.execute("ALTER TABLE readings ADD COLUMN file_id TEXT")
-        except:pass
-        c.execute("CREATE TABLE IF NOT EXISTS stats(id INTEGER PRIMARY KEY AUTOINCREMENT,total INTEGER DEFAULT 0,users INTEGER DEFAULT 0,starts INTEGER DEFAULT 0)")
-        try: c.execute("ALTER TABLE stats ADD COLUMN starts INTEGER DEFAULT 0")
-        except: pass
-        c.execute("CREATE TABLE IF NOT EXISTS user_limits(user_id INTEGER PRIMARY KEY,daily_date TEXT,daily_count INTEGER DEFAULT 0,unlimited_until TEXT,bonus_readings INTEGER DEFAULT 0)")
-        try: c.execute("ALTER TABLE user_limits ADD COLUMN bonus_readings INTEGER DEFAULT 0")
-        except: pass
-        c.execute("CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,payload TEXT,stars INTEGER,ts TEXT)")
-        c.execute("CREATE TABLE IF NOT EXISTS referrals(id INTEGER PRIMARY KEY AUTOINCREMENT,referrer_id INTEGER,referee_id INTEGER,ts TEXT)")
-def record_reading(uid,cid,cname,fid):
-    with sqlite3.connect(DB) as conn:
-        conn.execute("INSERT INTO readings(user_id,cat_id,cat_name,file_id,ts) VALUES(?,?,?,?,?)",(uid,cid,cname,fid,datetime.now().isoformat()))
-        cur=conn.execute("UPDATE stats SET total=COALESCE(total,0)+1 WHERE id=1")
-        if cur.rowcount==0:conn.execute("INSERT INTO stats(id,total,users) VALUES(1,1,0)")
-        users=conn.execute("SELECT COUNT(DISTINCT user_id) FROM readings").fetchone()[0];conn.execute("UPDATE stats SET users=? WHERE id=1",(users,))
-def record_start():
-    with sqlite3.connect(DB) as conn:
-        cur=conn.execute("UPDATE stats SET starts=COALESCE(starts,0)+1 WHERE id=1")
-        if cur.rowcount==0:conn.execute("INSERT INTO stats(id,total,users,starts) VALUES(1,0,0,1)")
+DB_POOL = None
 
-def _get_limit_info(user_id):
-    with sqlite3.connect(DB) as conn:
-        try:
-            row = conn.execute("SELECT daily_date, daily_count, unlimited_until, bonus_readings FROM user_limits WHERE user_id=?", (user_id,)).fetchone()
-            if row: return {"daily_date": row[0], "daily_count": row[1], "unlimited_until": row[2], "bonus_readings": row[3] or 0}
-        except:
-            row = conn.execute("SELECT daily_date, daily_count, unlimited_until FROM user_limits WHERE user_id=?", (user_id,)).fetchone()
-            if row: return {"daily_date": row[0], "daily_count": row[1], "unlimited_until": row[2], "bonus_readings": 0}
+async def get_pool():
+    global DB_POOL
+    if DB_POOL is None:
+        dsn = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/catwood")
+        if dsn.startswith("postgres://"):
+            dsn = dsn.replace("postgres://", "postgresql://", 1)
+        DB_POOL = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=4)
+    return DB_POOL
+
+async def init_db():
+    pool = await get_pool()
+    async with pool.acquire() as c:
+        await c.execute("""
+            CREATE TABLE IF NOT EXISTS readings(
+                id SERIAL PRIMARY KEY, user_id BIGINT,
+                cat_id INTEGER, cat_name TEXT,
+                file_id TEXT, ts TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await c.execute("""
+            CREATE TABLE IF NOT EXISTS stats(
+                id SERIAL PRIMARY KEY, total INTEGER DEFAULT 0,
+                users INTEGER DEFAULT 0, starts INTEGER DEFAULT 0
+            )
+        """)
+        await c.execute("""
+            CREATE TABLE IF NOT EXISTS user_limits(
+                user_id BIGINT PRIMARY KEY, daily_date TEXT,
+                daily_count INTEGER DEFAULT 0,
+                unlimited_until TEXT, bonus_readings INTEGER DEFAULT 0
+            )
+        """)
+        await c.execute("""
+            CREATE TABLE IF NOT EXISTS payments(
+                id SERIAL PRIMARY KEY, user_id BIGINT,
+                payload TEXT, stars INTEGER, ts TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await c.execute("""
+            CREATE TABLE IF NOT EXISTS referrals(
+                id SERIAL PRIMARY KEY, referrer_id BIGINT,
+                referee_id BIGINT, ts TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await c.execute("INSERT INTO stats(id,total,users,starts) VALUES(1,0,0,0) ON CONFLICT DO NOTHING")
+
+async def record_reading(uid, cid, cname, fid):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("INSERT INTO readings(user_id,cat_id,cat_name,file_id,ts) VALUES($1,$2,$3,$4,NOW())", uid, cid, cname, fid)
+        await conn.execute("UPDATE stats SET total=COALESCE(total,0)+1 WHERE id=1")
+        users = await conn.fetchval("SELECT COUNT(DISTINCT user_id) FROM readings")
+        await conn.execute("UPDATE stats SET users=$1 WHERE id=1", users)
+
+async def record_start():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        r = await conn.execute("UPDATE stats SET starts=COALESCE(starts,0)+1 WHERE id=1")
+        if r == "UPDATE 0":
+            await conn.execute("INSERT INTO stats(id,total,users,starts) VALUES(1,0,0,1) ON CONFLICT DO NOTHING")
+
+async def _get_limit_info(user_id):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT daily_date, daily_count, unlimited_until, COALESCE(bonus_readings,0) as br FROM user_limits WHERE user_id=$1", user_id)
+        if row:
+            return {"daily_date": row["daily_date"], "daily_count": row["daily_count"], "unlimited_until": row["unlimited_until"], "bonus_readings": row["br"]}
         return None
 
-def _can_read(user_id):
+async def _can_read(user_id):
     today = datetime.now().strftime("%Y-%m-%d")
-    info = _get_limit_info(user_id)
+    info = await _get_limit_info(user_id)
     if info and info["unlimited_until"]:
         try:
             if datetime.fromisoformat(info["unlimited_until"]) > datetime.now():
@@ -336,28 +373,29 @@ def _can_read(user_id):
         return "limit"
     return "ok"
 
-def _use_reading(user_id):
+async def _use_reading(user_id):
     today = datetime.now().strftime("%Y-%m-%d")
-    with sqlite3.connect(DB) as conn:
-        info = _get_limit_info(user_id)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        info = await _get_limit_info(user_id)
         if info:
             if info["daily_date"] == today:
                 bonus = info["bonus_readings"] or 0
                 if bonus > 0 and info["daily_count"] >= 3:
-                    conn.execute("UPDATE user_limits SET bonus_readings=bonus_readings-1 WHERE user_id=?", (user_id,))
+                    await conn.execute("UPDATE user_limits SET bonus_readings=bonus_readings-1 WHERE user_id=$1", user_id)
                     return
-                conn.execute("UPDATE user_limits SET daily_count=daily_count+1 WHERE user_id=?", (user_id,))
+                await conn.execute("UPDATE user_limits SET daily_count=daily_count+1 WHERE user_id=$1", user_id)
             else:
                 bonus = info["bonus_readings"] or 0
                 if bonus > 0:
-                    conn.execute("UPDATE user_limits SET daily_date=?, daily_count=0, bonus_readings=bonus_readings-1 WHERE user_id=?", (today, user_id))
+                    await conn.execute("UPDATE user_limits SET daily_date=$1, daily_count=0, bonus_readings=bonus_readings-1 WHERE user_id=$2", today, user_id)
                 else:
-                    conn.execute("UPDATE user_limits SET daily_date=?, daily_count=1 WHERE user_id=?", (today, user_id))
+                    await conn.execute("UPDATE user_limits SET daily_date=$1, daily_count=1 WHERE user_id=$2", today, user_id)
         else:
-            conn.execute("INSERT INTO user_limits(user_id, daily_date, daily_count) VALUES(?,?,1)", (user_id, today))
+            await conn.execute("INSERT INTO user_limits(user_id, daily_date, daily_count) VALUES($1,$2,1)", user_id, today)
 
-def _get_daily_remaining(user_id):
-    info = _get_limit_info(user_id)
+async def _get_daily_remaining(user_id):
+    info = await _get_limit_info(user_id)
     if not info: return 3
     if info["unlimited_until"]:
         try:
@@ -369,37 +407,46 @@ def _get_daily_remaining(user_id):
     if info["daily_date"] == today: return max(0, 3 + extra - info["daily_count"])
     return 3 + extra
 
-def _set_unlimited(user_id, days=30):
+async def _set_unlimited(user_id, days=30):
     until = (datetime.now() + timedelta(days=days)).isoformat()
     today = datetime.now().strftime("%Y-%m-%d")
-    with sqlite3.connect(DB) as conn:
-        conn.execute("INSERT OR REPLACE INTO user_limits(user_id, daily_date, daily_count, unlimited_until) VALUES(?,?,COALESCE((SELECT daily_count FROM user_limits WHERE user_id=?),0),?)", (user_id, today, user_id, until))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        cur = await conn.fetchval("SELECT daily_count FROM user_limits WHERE user_id=$1", user_id)
+        daily_count = cur if cur is not None else 0
+        await conn.execute("""
+            INSERT INTO user_limits(user_id, daily_date, daily_count, unlimited_until)
+            VALUES($1,$2,$3,$4)
+            ON CONFLICT(user_id) DO UPDATE SET daily_date=$2, daily_count=$3, unlimited_until=$4
+        """, user_id, today, daily_count, until)
 
-def _record_payment(user_id, payload, stars):
-    with sqlite3.connect(DB) as conn:
-        conn.execute("INSERT INTO payments(user_id, payload, stars, ts) VALUES(?,?,?,?)", (user_id, payload, stars, datetime.now().isoformat()))
+async def _record_payment(user_id, payload, stars):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("INSERT INTO payments(user_id, payload, stars, ts) VALUES($1,$2,$3,NOW())", user_id, payload, stars)
 
-def _add_bonus(user_id, amount=1):
-    try:
-        with sqlite3.connect(DB) as conn:
-            conn.execute("INSERT INTO user_limits(user_id,daily_date,daily_count,bonus_readings) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET bonus_readings=bonus_readings+?", (user_id, datetime.now().strftime("%Y-%m-%d"), 0, amount, amount))
-    except:
-        try:
-            with sqlite3.connect(DB) as conn:
-                conn.execute("INSERT OR IGNORE INTO user_limits(user_id,daily_date,daily_count) VALUES(?,?,0)", (user_id, datetime.now().strftime("%Y-%m-%d")))
-        except: pass
+async def _add_bonus(user_id, amount=1):
+    today = datetime.now().strftime("%Y-%m-%d")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO user_limits(user_id,daily_date,daily_count,bonus_readings)
+            VALUES($1,$2,0,$3)
+            ON CONFLICT(user_id) DO UPDATE SET bonus_readings=COALESCE(user_limits.bonus_readings,0)+$3
+        """, user_id, today, amount)
 
 async def start(u,c):
-    record_start()
+    await record_start()
     args = c.args
     if args and args[0].startswith("ref_"):
         referrer_id = int(args[0][4:])
         referee_id = u.effective_user.id
         if referrer_id != referee_id:
-            _add_bonus(referrer_id, 1)
+            await _add_bonus(referrer_id, 1)
             try:
-                with sqlite3.connect(DB) as conn:
-                    conn.execute("INSERT INTO referrals(referrer_id, referee_id, ts) VALUES(?,?,?)", (referrer_id, referee_id, datetime.now().isoformat()))
+                pool = await get_pool()
+                async with pool.acquire() as conn:
+                    await conn.execute("INSERT INTO referrals(referrer_id, referee_id, ts) VALUES($1,$2,NOW())", referrer_id, referee_id)
             except: pass
     await u.message.reply_text(
         f"🌿 *Дух Леса приветствует тебя, {u.effective_user.first_name}...* 🌿\n\n"
@@ -417,9 +464,9 @@ async def handle_voice(u,c):
     try:
         action = _pending_action.pop(user_id, None)
         if action not in ("legendary", "reroll"):
-            status = _can_read(user_id)
+            status = await _can_read(user_id)
             if status == "limit":
-                remaining = _get_daily_remaining(user_id)
+                remaining = await _get_daily_remaining(user_id)
                 await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
                 await u.message.reply_text(
                     f"🌫 *Лимит исчерпан* 🌫\n\nТы сегодня уже получил 3 тотема. Дух Леса устал.\n\n"
@@ -428,7 +475,7 @@ async def handle_voice(u,c):
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⭐ Безлимит (1 Star)", callback_data="buy_unlimited")]])
                 )
                 return
-            _use_reading(user_id)
+            await _use_reading(user_id)
         vf=await u.message.voice.get_file();ob=await vf.download_as_bytearray()
         await c.bot.edit_message_text("🎵 Эхо разносится по лесу...",chat_id=u.effective_chat.id,message_id=s.message_id)
         rms,f0=analyze_audio_bytes(ob);logger.info(f"User {user_id}: rms={rms:.3f}, f0={f0:.1f}")
@@ -467,7 +514,7 @@ async def handle_voice(u,c):
             img_data = img
             sent=await u.message.reply_photo(photo=io.BytesIO(img_data), caption=caption, parse_mode=None, reply_markup=share_kb, write_timeout=120, read_timeout=120)
         fid = sent.photo[-1].file_id
-        try:record_reading(user_id,cat['id'],cat['name'],fid)
+        try:await record_reading(user_id,cat['id'],cat['name'],fid)
         except:pass
         _share_data[user_id] = {"file_id": fid, "cat": cat, "chat_id": u.effective_chat.id, "message_id": sent.message_id}
         if ob:
@@ -480,18 +527,20 @@ async def handle_voice(u,c):
 
 async def stats(u,c):
     if u.effective_user.id!=ADMIN_ID:return await u.message.reply_text("❌ Только Хранитель Леса может видеть это.")
-    with sqlite3.connect(DB) as conn:
-        t=conn.execute("SELECT COUNT(*) FROM readings").fetchone()[0]
-        us=conn.execute("SELECT COUNT(DISTINCT user_id) FROM readings").fetchone()[0]
-        row=conn.execute("SELECT starts FROM stats WHERE id=1").fetchone()
-        st=row[0] if row else 0
-        rd=conn.execute("SELECT COUNT(*) FROM readings WHERE ts>=datetime('now','-1 day')").fetchone()[0]
-        rw=conn.execute("SELECT COUNT(*) FROM readings WHERE ts>=datetime('now','-7 days')").fetchone()[0]
-        try:stars=conn.execute("SELECT COALESCE(SUM(stars),0) FROM payments").fetchone()[0]
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        t=await conn.fetchval("SELECT COUNT(*) FROM readings") or 0
+        us=await conn.fetchval("SELECT COUNT(DISTINCT user_id) FROM readings") or 0
+        row=await conn.fetchval("SELECT starts FROM stats WHERE id=1")
+        st=row if row else 0
+        rd=await conn.fetchval("SELECT COUNT(*) FROM readings WHERE ts>=NOW() - INTERVAL '1 day'") or 0
+        rw=await conn.fetchval("SELECT COUNT(*) FROM readings WHERE ts>=NOW() - INTERVAL '7 days'") or 0
+        try:stars=await conn.fetchval("SELECT COALESCE(SUM(stars),0) FROM payments") or 0
         except:stars=0
-        try:refs=conn.execute("SELECT COUNT(*) FROM referrals").fetchone()[0]
+        try:refs=await conn.fetchval("SELECT COUNT(*) FROM referrals") or 0
         except:refs=0
-        top=conn.execute("SELECT cat_name, COUNT(*) as cnt FROM readings GROUP BY cat_name ORDER BY cnt DESC LIMIT 5").fetchall()
+        top_rows=await conn.fetch("SELECT cat_name, COUNT(*) as cnt FROM readings GROUP BY cat_name ORDER BY cnt DESC LIMIT 5")
+        top=[(r["cat_name"], r["cnt"]) for r in top_rows]
     msg=(
         f"🌿 *Святилище Кошачьего Духа* 🌿\n\n"
         f"👣 Заходов: *{st}*\n"
@@ -533,7 +582,7 @@ async def help_cmd(u,c):
     )
 
 async def premium(u,c):
-    remaining = _get_daily_remaining(u.effective_user.id)
+    remaining = await _get_daily_remaining(u.effective_user.id)
     if remaining == float('inf'):
         await u.message.reply_text(
             "🌟 *У тебя уже есть Безлимитный доступ!* 🌟\n\n"
@@ -598,9 +647,9 @@ async def successful_payment_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
     user_id = u.effective_user.id
     payload = u.message.successful_payment.invoice_payload
     stars = u.message.successful_payment.total_amount
-    _record_payment(user_id, payload, stars)
+    await _record_payment(user_id, payload, stars)
     if payload == "buy_unlimited":
-        _set_unlimited(user_id)
+        await _set_unlimited(user_id)
         await u.message.reply_text(
             "🌟 *Безлимитный доступ активирован на 30 дней!* 🌟\n\n"
             "Дух Леса благодарит тебя! Теперь никаких ограничений.\n\n"
@@ -616,7 +665,7 @@ async def successful_payment_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
             caption = f"🔄 *Переброс!* 🔄\n\n{cat['emoji']} {cat['title']}\n{cat['description']}\n\n🌀 Стихия: {cat['element']}"
             sent = await u.message.reply_photo(photo=io.BytesIO(img), caption=caption, parse_mode="Markdown", write_timeout=120, read_timeout=120)
             fid = sent.photo[-1].file_id
-            try: record_reading(user_id, cat['id'], cat['name'], fid)
+            try: await record_reading(user_id, cat['id'], cat['name'], fid)
             except: pass
             _share_data[user_id] = {"file_id": fid, "voice_file_id": u.message.voice.file_id, "cat": cat, "chat_id": u.effective_chat.id, "message_id": sent.message_id}
             await u.message.reply_text("🐾 *Твой новый тотем!* Поделись с друзьями!", parse_mode="Markdown")
@@ -704,15 +753,15 @@ async def save_card(u: Update, c: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Save card error: {e}", exc_info=True)
         await query.answer("❌ Не удалось сохранить. Попробуй ещё раз.", show_alert=True)
 
-def _get_user_cat(user_id):
+async def _get_user_cat(user_id):
     try:
-        with sqlite3.connect(DB) as conn:
-            cur = conn.execute("SELECT cat_id,file_id FROM readings WHERE user_id=? ORDER BY ts DESC LIMIT 1", (user_id,))
-            row = cur.fetchone()
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT cat_id,file_id FROM readings WHERE user_id=$1 ORDER BY ts DESC LIMIT 1", user_id)
             if row:
                 for c in CATS:
-                    if c[0] == row[0]:
-                        return {"id": c[0], "title": c[1], "name": c[2], "description": c[3], "element": c[4], "emoji": c[5], "file_id": row[1]}
+                    if c[0] == row["cat_id"]:
+                        return {"id": c[0], "title": c[1], "name": c[2], "description": c[3], "element": c[4], "emoji": c[5], "file_id": row["file_id"]}
     except: pass
     return None
 
@@ -726,7 +775,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.inline_query.answer([], cache_time=0, is_personal=True)
         return
     data = _share_data.get(user_id)
-    db_cat = _get_user_cat(user_id) if not data else None
+    db_cat = await _get_user_cat(user_id) if not data else None
     cat = data["cat"] if data else (db_cat if db_cat else None)
     file_id = data.get("file_id") if data else (db_cat.get("file_id") if db_cat else None)
     voice_file_id = data.get("voice_file_id") if data else None
@@ -774,7 +823,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def async_main():
     logger.info("🌿 Дух Леса пробуждается...")
-    init_db()
+    await init_db()
     PORT = int(os.environ.get("PORT", 10000))
     BASE = os.environ.get("RENDER_EXTERNAL_URL", "https://cat-oracle-3jeq.onrender.com")
     SECRET = os.environ.get("WEBHOOK_SECRET", "forest-whisper")
@@ -834,6 +883,8 @@ async def async_main():
         await asyncio.Event().wait()
     finally:
         await app.stop()
+        if DB_POOL:
+            await DB_POOL.close()
 
 def main():
     asyncio.run(async_main())
