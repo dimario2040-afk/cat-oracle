@@ -464,25 +464,54 @@ async def _add_bonus(user_id, amount=1):
 async def start(u,c):
     await record_start()
     args = c.args
+    referred_by = None
     if args and args[0].startswith("ref_"):
         referrer_id = int(args[0][4:])
         referee_id = u.effective_user.id
         if referrer_id != referee_id:
-            await _add_bonus(referrer_id, 1)
-            try:
-                pool = await get_pool()
-                async with pool.acquire() as conn:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                # дедупликация — один реферал = один бонус
+                existing = await conn.fetchval("SELECT 1 FROM referrals WHERE referee_id=$1", referee_id)
+                if not existing:
+                    await _add_bonus(referrer_id, 1)
                     await conn.execute("INSERT INTO referrals(referrer_id, referee_id, ts) VALUES($1,$2,NOW())", referrer_id, referee_id)
-            except: pass
-    await u.message.reply_text(
-        f"🌿 *Дух Леса приветствует тебя, {u.effective_user.first_name}...* 🌿\n\n"
-        "Ты стоишь на пороге *Зачарованного Леса*.\n"
-        "Духи слышат твои шаги. Они хотят услышать твой голос.\n\n"
-        "🎤 *Нажми на микрофон* и издай звук как кот:\n"
-        "— Мяу, мурлыкай, шипи, вой, рычи...\n\n"
-        "🐾 *Готов?* Тогда мяу, странник... 🐾",
-        parse_mode="Markdown"
-    )
+                    # пробуем получить имя пригласившего
+                    try:
+                        ref_chat = await c.bot.get_chat(referrer_id)
+                        referred_by = ref_chat.first_name
+                    except:
+                        referred_by = "друг"
+                    # уведомление рефереру
+                    try:
+                        await c.bot.send_message(
+                            chat_id=referrer_id,
+                            text=f"🎉 *{u.effective_user.first_name}* перешёл по твоей ссылке!\n"
+                                 f"Ты получил +1 гадание 🐱",
+                            parse_mode="Markdown",
+                        )
+                    except:
+                        pass
+    if referred_by:
+        await u.message.reply_text(
+            f"🌿 *{u.effective_user.first_name}...* 🌿\n\n"
+            f"🐾 *{referred_by}* позвал тебя в *Зачарованный Лес*!\n\n"
+            "Духи слышат твои шаги. Они хотят услышать твой голос.\n\n"
+            "🎤 *Нажми на микрофон* и издай звук как кот:\n"
+            "— Мяу, мурлыкай, шипи, вой, рычи...\n\n"
+            "🐾 *Готов?* Тогда мяу, странник... 🐾",
+            parse_mode="Markdown"
+        )
+    else:
+        await u.message.reply_text(
+            f"🌿 *Дух Леса приветствует тебя, {u.effective_user.first_name}...* 🌿\n\n"
+            "Ты стоишь на пороге *Зачарованного Леса*.\n"
+            "Духи слышат твои шаги. Они хотят услышать твой голос.\n\n"
+            "🎤 *Нажми на микрофон* и издай звук как кот:\n"
+            "— Мяу, мурлыкай, шипи, вой, рычи...\n\n"
+            "🐾 *Готов?* Тогда мяу, странник... 🐾",
+            parse_mode="Markdown"
+        )
 
 async def handle_voice(u,c):
     user_id = u.effective_user.id
@@ -608,19 +637,33 @@ async def help_cmd(u,c):
     )
 
 async def premium(u,c):
-    remaining = await _get_daily_remaining(u.effective_user.id)
+    user_id = u.effective_user.id
+    remaining = await _get_daily_remaining(user_id)
     if remaining == float('inf'):
+        # безлимитные тоже могут узнать про рефералов
+        info = await _get_limit_info(user_id)
+        bonus = info["bonus_readings"] if info else 0
         await u.message.reply_text(
             "🌟 *У тебя уже есть Безлимитный доступ!* 🌟\n\n"
             "Спасибо за поддержку Зачарованного Леса!\n\n"
-            "👑 Хочешь Легендарного кота? Открой /premium\n"
+            f"👥 *Приведи друга:* ниже твоя ссылка\n"
+            f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}\n\n"
+            f"📦 Накоплено бонусных гаданий: *{bonus}*\n"
+            "Приведи друга → получи +1 гадание!\n\n"
+            "👑 Хочешь Легендарного кота? /premium\n"
             "🔄 Или перебрось тотем через /premium",
             parse_mode="Markdown"
         )
         return
+
+    info = await _get_limit_info(user_id)
+    bonus = info["bonus_readings"] if info else 0
     text = (
         f"🌟 *Зачарованный Лес — Премиум* 🌟\n\n"
         f"🐱 Бесплатных гаданий сегодня: *{remaining}*\n"
+        f"📦 Бонусных (за рефералов): *{bonus}*\n\n"
+        f"👥 *Приведи друга — получи +1 гадание:*\n"
+        f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}\n\n"
         f"🎭 Открой все тайны Леса с Telegram Stars!\n\n"
         f"⭐ *1 Star* — Безлимит на 30 дней ✨\n"
         f"   Сними дневной лимит!\n\n"
