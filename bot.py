@@ -894,33 +894,39 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def give_oreshek(u,c):
     if u.effective_user.id != ADMIN_ID:
         return await u.message.reply_text("❌ Только Хранитель Леса.")
+    user_id = u.effective_user.id
+    cat = {"id":71,"name":"Орешек","title":"Кот-Орешек",
+           "description":"Снаружи твёрдая скорлупа, внутри — свет и сила.",
+           "element":"земля","emoji":"\U0001f95c"}
+    caption = (
+        f"\U0001f31f *{cat['title']}* \U0001f31f\n\n"
+        f"{cat['emoji']} {cat['name']}\n"
+        f"{cat['description']}\n\n"
+        f"\U0001f300 Стихия: {cat['element']}\n\n"
+        f"Хочешь узнать свой тотем? Отправь боту голосовое сообщение с кошачьим голосом! \U0001f43e\n\n"
+        f"\U0001f465 Приведи друга — получи +1 гадание: https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
+    )
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("\U0001f4e4 Сохранить в Избранное", callback_data="save_card")
+    ],[
+        InlineKeyboardButton("\U0001f4e2 Поделиться с друзьями", switch_inline_query=str(user_id))
+    ]])
     try:
-        img_data = None
+        img_path = None
         for ext in ("jpeg", "jpg", "png"):
             p = Path("image") / f"71.{ext}"
             if p.is_file():
-                img_data = p.read_bytes()
+                img_path = p
                 break
-        if img_data:
-            await u.message.reply_photo(
-                photo=io.BytesIO(img_data),
-                caption="🥜 *Кот-Орешек* 🌰\n\n"
-                        "Снаружи твёрдая скорлупа, внутри — свет и сила.\n\n"
-                        "🌀 Стихия: ЗЕМЛЯ\n\n"
-                        "Тотем #71",
-                parse_mode="Markdown",
-            )
+        if img_path:
+            await u.message.reply_photo(photo=img_path.read_bytes(), caption=caption, parse_mode="Markdown", reply_markup=kb)
             return
     except Exception as e:
         logger.warning(f"give_oreshek image load failed: {e}")
-    # fallback — генеруем карточку
+    # fallback — сгенерированная карточка
     try:
-        cat = {"id":71,"name":"Орешек","title":"Кот-Орешек",
-               "description":"Снаружи твёрдая скорлупа, внутри — свет и сила.",
-               "element":"земля","emoji":"🥜"}
-        img = gen_card(cat)  # returns PNG bytes
-        await u.message.reply_photo(photo=io.BytesIO(img),
-            caption="🥜 *Кот-Орешек* 🌰 — Тотем #71", parse_mode="Markdown")
+        img = gen_card(cat)
+        await u.message.reply_photo(photo=io.BytesIO(img), caption=caption, parse_mode="Markdown", reply_markup=kb)
     except Exception as e:
         logger.error(f"give_oreshek fallback failed: {e}")
         await u.message.reply_text("😿 *Лесные духи не смогли проявить образ...*", parse_mode="Markdown")
