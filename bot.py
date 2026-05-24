@@ -891,6 +891,28 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Inline answer error: {e}", exc_info=True)
 
+async def give_oreshek(u,c):
+    if u.effective_user.id != ADMIN_ID:
+        return await u.message.reply_text("❌ Только Хранитель Леса.")
+    try:
+        with open("image/71.png", "rb") as f:
+            img_data = f.read()
+        await u.message.reply_photo(
+            photo=io.BytesIO(img_data),
+            caption="🥜 *Кот-Орешек* 🌰\n\n"
+                    "Снаружи твёрдая скорлупа, внутри — свет и сила.\n\n"
+                    "🌀 Стихия: ЗЕМЛЯ\n\n"
+                    "Тотем #71",
+            parse_mode="Markdown",
+        )
+    except FileNotFoundError:
+        cat = {"id":71,"name":"Орешек","title":"Кот-Орешек",
+               "description":"Снаружи твёрдая скорлупа, внутри — свет и сила.",
+               "element":"земля","emoji":"🥜"}
+        img = gen_card(cat)
+        await u.message.reply_photo(photo=io.BytesIO(img),
+            caption="🥜 *Кот-Орешек* 🌰 — Тотем #71", parse_mode="Markdown")
+
 async def async_main():
     logger.info("🌿 Дух Леса пробуждается...")
     await init_db()
@@ -904,6 +926,7 @@ async def async_main():
     app.add_handler(CommandHandler("about",about))
     app.add_handler(CommandHandler("premium",premium))
     app.add_handler(CommandHandler("donate",donate))
+    app.add_handler(CommandHandler("give_oreshek",give_oreshek))
     app.add_handler(MessageHandler(filters.VOICE,handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
     app.add_handler(CallbackQueryHandler(save_card, pattern="^save_card$"))
