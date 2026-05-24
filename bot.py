@@ -905,13 +905,20 @@ async def give_oreshek(u,c):
                     "Тотем #71",
             parse_mode="Markdown",
         )
-    except FileNotFoundError:
+        return
+    except Exception as e:
+        logger.warning(f"give_oreshek image load failed: {e}")
+    # fallback — генеруем карточку
+    try:
         cat = {"id":71,"name":"Орешек","title":"Кот-Орешек",
                "description":"Снаружи твёрдая скорлупа, внутри — свет и сила.",
                "element":"земля","emoji":"🥜"}
-        img = gen_card(cat)
+        img = gen_card(cat)  # returns PNG bytes
         await u.message.reply_photo(photo=io.BytesIO(img),
             caption="🥜 *Кот-Орешек* 🌰 — Тотем #71", parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"give_oreshek fallback failed: {e}")
+        await u.message.reply_text("😿 *Лесные духи не смогли проявить образ...*", parse_mode="Markdown")
 
 async def async_main():
     logger.info("🌿 Дух Леса пробуждается...")
