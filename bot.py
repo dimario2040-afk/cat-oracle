@@ -895,17 +895,22 @@ async def give_oreshek(u,c):
     if u.effective_user.id != ADMIN_ID:
         return await u.message.reply_text("❌ Только Хранитель Леса.")
     try:
-        with open("image/71.png", "rb") as f:
-            img_data = f.read()
-        await u.message.reply_photo(
-            photo=io.BytesIO(img_data),
-            caption="🥜 *Кот-Орешек* 🌰\n\n"
-                    "Снаружи твёрдая скорлупа, внутри — свет и сила.\n\n"
-                    "🌀 Стихия: ЗЕМЛЯ\n\n"
-                    "Тотем #71",
-            parse_mode="Markdown",
-        )
-        return
+        img_data = None
+        for ext in ("jpeg", "jpg", "png"):
+            p = Path("image") / f"71.{ext}"
+            if p.is_file():
+                img_data = p.read_bytes()
+                break
+        if img_data:
+            await u.message.reply_photo(
+                photo=io.BytesIO(img_data),
+                caption="🥜 *Кот-Орешек* 🌰\n\n"
+                        "Снаружи твёрдая скорлупа, внутри — свет и сила.\n\n"
+                        "🌀 Стихия: ЗЕМЛЯ\n\n"
+                        "Тотем #71",
+                parse_mode="Markdown",
+            )
+            return
     except Exception as e:
         logger.warning(f"give_oreshek image load failed: {e}")
     # fallback — генеруем карточку
