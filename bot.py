@@ -519,7 +519,7 @@ def gen_card(cat, lang="ru", legendary=False):
     except:
         ft = fn = fd = fs = ImageFont.load_default()
     d.rectangle([20, 20, W - 20, H - 20], outline=ec + (80,), width=2)
-    t = f"{cat['emoji']}  {cat['name']}  {cat['emoji']}"
+    t = cat['name']
     bb = d.textbbox((0, 0), t, font=ft)
     d.text(((W - (bb[2] - bb[0])) // 2, 60), t, font=ft, fill=ec + (230,))
     bb = d.textbbox((0, 0), cat['title'], font=fn); nw = bb[2] - bb[0]
@@ -533,8 +533,9 @@ def gen_card(cat, lang="ru", legendary=False):
     t = _text("element_lbl", lang, element=cat['element'].upper())
     bb = d.textbbox((0, 0), t, font=fs)
     d.text(((W - (bb[2] - bb[0])) // 2, 350), t, font=fs, fill=ec + (180,))
-    s = random.choice(SYMS); bb = d.textbbox((0, 0), s, font=fn)
-    d.text(((W - (bb[2] - bb[0])) // 2, 420), s, font=fn, fill=ec + (60,))
+    # Diamond (PIL-drawn, safe)
+    cx, cy = W // 2, 420; s = 10
+    d.polygon([(cx, cy - s), (cx + s, cy), (cx, cy + s), (cx - s, cy)], fill=ec + (60,), outline=ec + (100,))
     t = _text("forest_chose", lang); bb = d.textbbox((0, 0), t, font=fs)
     d.text(((W - (bb[2] - bb[0])) // 2, 520), t, font=fs, fill=(255, 255, 255, 150))
     t = f"t.me/{BOT_USERNAME}"; bb = d.textbbox((0, 0), t, font=fs)
