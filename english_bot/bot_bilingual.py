@@ -1063,11 +1063,18 @@ async def help_cmd(u,c):
     await u.message.reply_text(_text("help_text", lang), parse_mode="Markdown")
 
 async def lang_cmd(u,c):
-    user_id = u.effective_user.id
-    current = await _get_lang(user_id) or _guess_lang(u)
-    new_lang = "en" if current == "ru" else "ru"
-    await _set_lang(user_id, new_lang)
-    await u.message.reply_text(_text("lang_set", new_lang), parse_mode="Markdown")
+    try:
+        user_id = u.effective_user.id
+        current = await _get_lang(user_id) or _guess_lang(u)
+        new_lang = "en" if current == "ru" else "ru"
+        await _set_lang(user_id, new_lang)
+        await u.message.reply_text(_text("lang_set", new_lang), parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"/lang error: {e}")
+        try:
+            await u.message.reply_text("⚠️ Language switch failed. Try /start", parse_mode="Markdown")
+        except:
+            pass
 
 async def language_select_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
     query = u.callback_query
@@ -1401,7 +1408,7 @@ async def async_main():
             return web.Response(status=200)
 
     async def health_handle(_request):
-        return web.Response(text="Bot is alive")
+        return web.Response(text="Bot is alive (bilingual v2)")
 
     web_app = web.Application()
     web_app.router.add_post(f"/{SECRET}", webhook_handle)
