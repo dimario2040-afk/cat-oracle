@@ -1,4 +1,4 @@
-import logging, os, sys, io, random, tempfile, urllib.parse, asyncio
+import logging, os, sys, io, random, tempfile, urllib.parse, urllib.request, asyncio
 import asyncpg
 from aiohttp import web
 from pathlib import Path
@@ -18,6 +18,38 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8827616686:AAFwdGgz5dkKEe_VbXvfHHecZk3S
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
 
 BOT_USERNAME = "catwood_bot"
+
+# ── language strings (minimal for /lang) ──
+_LANG_T = {
+    "lang_set_ru": "🌐 Язык переключён на русский!",
+    "lang_set_en": "🌐 Language switched to English!",
+}
+
+def _guess_lang(update):
+    user = update.effective_user
+    if user and user.language_code:
+        lc = user.language_code.split("-")[0].strip().lower()
+        if lc in ("ru","be","uk","kk"):
+            return "ru"
+    return "en"
+
+async def _get_lang(user_id):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        v = await conn.fetchval("SELECT lang FROM user_limits WHERE user_id=$1", user_id)
+        if v:
+            return v
+    return None
+
+async def _set_lang(user_id, lang):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO user_limits(user_id, daily_date, daily_count, lang)
+            VALUES($1, '', 0, $2)
+            ON CONFLICT(user_id) DO UPDATE SET lang=$2
+        """, user_id, lang)
+
 
 CATS = [
     (1,"Дух Света","Светозарный Кот","Твой голос прорезает тьму, как первый луч рассвета.","свет","✨",0,0.3,0,400),
@@ -362,6 +394,11 @@ async def init_db():
             )
         """)
         await c.execute("INSERT INTO stats(id,total,users,starts) VALUES(1,0,0,0) ON CONFLICT DO NOTHING")
+        # lang column for /lang feature
+        try:
+            await c.execute("ALTER TABLE user_limits ADD COLUMN IF NOT EXISTS lang TEXT DEFAULT 'ru'")
+        except:
+            pass
 
 async def record_reading(uid, cid, cname, fid):
     pool = await get_pool()
@@ -633,9 +670,24 @@ async def help_cmd(u,c):
         "3️⃣ Получи своего кота-тотема!\n"
         "4️⃣ Поделись с друзьями\n\n"
         "✨ *Каждый голос уникален — каждый тотем священен* ✨\n\n"
-        "Команды: /start /help /stats /about /premium",
+        "Команды: /start /help /stats /about /premium\n"
+        "💬 /lang — переключить язык на русский/english",
         parse_mode="Markdown"
     )
+
+async def lang_cmd(u,c):
+    try:
+        user_id = u.effective_user.id
+        current = await _get_lang(user_id) or _guess_lang(u)
+        new_lang = "en" if current == "ru" else "ru"
+        await _set_lang(user_id, new_lang)
+        await u.message.reply_text(_LANG_T[f"lang_set_{new_lang}"], parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"/lang error: {e}")
+        try:
+            await u.message.reply_text("⚠️ Language switch failed. Try /start")
+        except:
+            pass
 
 async def premium(u,c):
     user_id = u.effective_user.id
@@ -945,6 +997,8 @@ async def async_main():
     app.add_handler(CommandHandler("premium",premium))
     app.add_handler(CommandHandler("donate",donate))
     app.add_handler(CommandHandler("give_oreshek",give_oreshek))
+    app.add_handler(CommandHandler("lang", lang_cmd))
+    app.add_handler(CommandHandler("language", lang_cmd))
     app.add_handler(MessageHandler(filters.VOICE,handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
     app.add_handler(CallbackQueryHandler(save_card, pattern="^save_card$"))
