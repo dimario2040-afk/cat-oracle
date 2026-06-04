@@ -1386,8 +1386,11 @@ async def async_main():
     await app.initialize()
     await app.start()
     webhook_url = f"{BASE}/{SECRET}"
-    await app.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-    logger.info(f"🌿 Webhook set: {webhook_url}")
+    try:
+        await app.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+        logger.info(f"🌿 Webhook set: {webhook_url}")
+    except Exception as e:
+        logger.error(f"🌿 Webhook FAILED (bot will still serve health-check): {e}")
     logger.info("🌿 The Forest Spirit watches over the world... Running!")
 
     async def webhook_handle(request):
