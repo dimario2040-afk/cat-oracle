@@ -186,10 +186,10 @@ _pending_action = {}
 
 _T = {
     # gen_card
-    "element_lbl": {"ru": "🌀 СТИХИЯ: {{element}}", "en": "🌀 ELEMENT: {{element}}"},
-    "forest_chose": {"ru": "🐾 Дух Леса указал на тебя 🐾", "en": "🐾 The Forest Spirit chose you 🐾"},
-    "totem_num": {"ru": "✦ Тотем #{} ✦", "en": "✦ Totem #{} ✦"},
-    "legendary_badge": {"ru": "👑 ЛЕГЕНДАРНЫЙ ТОТЕМ 👑", "en": "👑 LEGENDARY TOTEM 👑"},
+    "element_lbl": {"ru": "СТИХИЯ: {{element}}", "en": "ELEMENT: {{element}}"},
+    "forest_chose": {"ru": "Дух Леса указал на тебя", "en": "The Forest Spirit chose you"},
+    "totem_num": {"ru": "Тотем #{}", "en": "Totem #{}"},
+    "legendary_badge": {"ru": "ЛЕГЕНДАРНЫЙ ТОТЕМ", "en": "LEGENDARY TOTEM"},
     "t.me": {"ru": "", "en": ""},  # no translation needed, but placeholder
 
     # video
