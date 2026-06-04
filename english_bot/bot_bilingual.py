@@ -217,10 +217,10 @@ _T = {
     # start
     "ref_notify": {"ru": "🎉 *{{name}}* перешёл по твоей ссылке!\nТы получил +1 гадание 🐱",
                    "en": "🎉 *{{name}}* clicked your link!\nYou earned +1 reading 🐱"},
-    "welcome_ref": {"ru": "🌿 *{{name}}, {{referrer}} позвал тебя в Зачарованный Лес...* 🌿\n\n70+ кошачьих духов ждут твой голос. Твой первый звук родит тотем.\n\n🎤 *Нажми на микрофон и мяукни.*\nДухи уже слушают...\n\n🐾 *Готов?* Тогда мяу, странник... 🐾",
-                     "en": "🌿 *{{name}}, {{referrer}} has summoned you to the Enchanted Woods...* 🌿\n\n70+ cat spirits await your voice. Your first sound will birth a totem.\n\n🎤 *Hit the mic and meow.*\nThe spirits are listening...\n\n🐾 *Ready?* Then meow stranger... 🐾"},
-    "welcome_new": {"ru": "🌿 *{{name}}, ты стоишь на пороге Зачарованного Леса...* 🌿\n\n70+ кошачьих духов ждут твой голос. Твой первый звук родит тотем.\n\n🎤 *Нажми на микрофон и мяукни.*\nДухи уже слушают...\n\n🐾 *Готов?* Тогда мяу, странник... 🐾",
-                    "en": "🌿 *{{name}}, you stand at the edge of the Enchanted Woods...* 🌿\n\n70+ cat spirits await your voice. Your first sound will birth a totem.\n\n🎤 *Hit the mic and meow.*\nThe spirits are listening...\n\n🐾 *Ready?* Then meow stranger... 🐾"},
+    "welcome_ref": {"ru": "🌿 *{{name}}, {{referrer}} позвал тебя в Зачарованный Лес...* 🌿\n\n70+ кошачьих духов ждут твой голос. Твой первый звук родит тотем.\n\n🎤 *Нажми на микрофон и мяукни.*\nДухи уже слушают...\n\n🐾 *Готов?* Тогда мяу, странник...\n\n💬 /lang — переключить язык",
+                     "en": "🌿 *{{name}}, {{referrer}} has summoned you to the Enchanted Woods...* 🌿\n\n70+ cat spirits await your voice. Your first sound will birth a totem.\n\n🎤 *Hit the mic and meow.*\nThe spirits are listening...\n\n🐾 *Ready?* Then meow stranger...\n\n💬 /lang — switch language"},
+    "welcome_new": {"ru": "🌿 *{{name}}, ты стоишь на пороге Зачарованного Леса...* 🌿\n\n70+ кошачьих духов ждут твой голос. Твой первый звук родит тотем.\n\n🎤 *Нажми на микрофон и мяукни.*\nДухи уже слушают...\n\n🐾 *Готов?* Тогда мяу, странник...\n\n💬 /lang — переключить язык",
+                    "en": "🌿 *{{name}}, you stand at the edge of the Enchanted Woods...* 🌿\n\n70+ cat spirits await your voice. Your first sound will birth a totem.\n\n🎤 *Hit the mic and meow.*\nThe spirits are listening...\n\n🐾 *Ready?* Then meow stranger...\n\n💬 /lang — switch language"},
 
     # totem reveal caption (photo message after voice analysis)
     "totem_reveal": {"ru": "🌟 *{{title}}* 🌟\n\n{{emoji}} {{name}}\n{{desc}}\n\n🌀 Стихия: {{element}}\n\n👥 *Приведи друга — узнай, кто он:*\n{{ref}}",
@@ -261,8 +261,8 @@ _T = {
                    "en": "🌲 *About the Totem Cat Sanctuary* 🌲\n\nThe idea was born from a conversation between two wanderers:\n🎭 *Dmitry* — wanted a magical box with AI for cats\n🧙 *Timofey* — noticed the trend of bird voice messages\n\nAnd so the *Cat Fortune Cookie* was born —\na bot that listens to your voice and finds\nyour ancient cat spirit totem.\n\n71 cats. 71 fates. 71 totems.\n\n🎨 *Sticker pack:* [CatWood](https://t.me/addstickers/CatWood)\n\n🐾 *Record your voice — find out who you really are* 🐾"},
 
     # help
-    "help_text": {"ru": "🐱 *Кото-печенька — Как это работает* 🐱\n\n1️⃣ Отправь голосовое сообщение\n2️⃣ Мяукай, мурлычь, шипи, вой, ори\n3️⃣ Получи своего кота-тотема!\n4️⃣ Поделись с друзьями\n\n✨ *Каждый голос уникален — каждый тотем священен* ✨\n\nКоманды: /start /help /stats /about /premium",
-                  "en": "🐱 *Cat Fortune Cookie — How it works* 🐱\n\n1️⃣ Send a voice message\n2️⃣ Meow purr hiss howl scream\n3️⃣ Get your cat totem!\n4️⃣ Share with friends\n\n✨ *Every voice is unique — every totem is sacred* ✨\n\nCommands: /start /help /stats /about /premium"},
+    "help_text": {"ru": "🐱 *Кото-печенька — Как это работает* 🐱\n\n1️⃣ Отправь голосовое сообщение\n2️⃣ Мяукай, мурлычь, шипи, вой, ори\n3️⃣ Получи своего кота-тотема!\n4️⃣ Поделись с друзьями\n\n✨ *Каждый голос уникален — каждый тотем священен* ✨\n\nКоманды: /start /help /stats /about /premium\n💬 /lang — переключить язык на русский/english",
+                  "en": "🐱 *Cat Fortune Cookie — How it works* 🐱\n\n1️⃣ Send a voice message\n2️⃣ Meow purr hiss howl scream\n3️⃣ Get your cat totem!\n4️⃣ Share with friends\n\n✨ *Every voice is unique — every totem is sacred* ✨\n\nCommands: /start /help /stats /about /premium\n💬 /lang — switch between русский/english"},
 
     # premium
     "premium_unlimited": {"ru": "🌟 *У тебя уже есть Безлимитный доступ!* 🌟\n\nСпасибо за поддержку Зачарованного Леса!\n\n👥 *Приведи друга:* ниже твоя ссылка\n{{ref}}\n\n📦 Накоплено бонусных гаданий: *{{bonus}}*\nПриведи друга → получи +1 гадание!\n\n👑 Хочешь Легендарного кота? /premium\n🔄 Или переброс тотема через /premium",
@@ -317,10 +317,10 @@ _T = {
                     "en": "🌍 *Choose language* / *Выбери язык*"},
     "btn_lang_ru": {"ru": "🇷🇺 Русский", "en": "🇷🇺 Русский"},
     "btn_lang_en": {"ru": "🇬🇧 English", "en": "🇬🇧 English"},
-    "lang_welcome_ru": {"ru": "🌿 *Отлично!* Продолжим на русском 🐱\n\nНажми /start ещё раз, чтобы войти в Зачарованный Лес.",
-                         "en": "🌿 *Great!* Let's continue in Russian 🐱\n\nType /start again to enter the Enchanted Woods."},
-    "lang_welcome_en": {"ru": "🌿 *Great!* Let's continue in English 🐱\n\nType /start again to enter the Enchanted Woods.",
-                         "en": "🌿 *Great!* Let's continue in English 🐱\n\nType /start again to enter the Enchanted Woods."},
+    "lang_welcome_ru": {"ru": "🌿 *Отлично, {{name}}!* Продолжим на русском 🐱\n\n70+ кошачьих духов ждут твой голос. Твой первый звук родит тотем.\n\n🎤 *Нажми на микрофон и мяукни.*\n\n💬 /lang — переключить язык в любой момент",
+                         "en": "🌿 *Great, {{name}}!* Let's continue in Russian 🐱\n\n70+ cat spirits await your voice. Your first sound will birth a totem.\n\n🎤 *Tap the mic and meow.*\n\n💬 /lang — switch language anytime"},
+    "lang_welcome_en": {"ru": "🌿 *Great, {{name}}!* Let's continue in English 🐱\n\n70+ cat spirits await your voice. Your first sound will birth a totem.\n\n🎤 *Tap the mic and meow.*\n\n💬 /lang — switch language anytime",
+                         "en": "🌿 *Great, {{name}}!* Let's continue in English 🐱\n\n70+ cat spirits await your voice. Your first sound will birth a totem.\n\n🎤 *Tap the mic and meow.*\n\n💬 /lang — switch language anytime"},
 }
 
 
@@ -1076,7 +1076,7 @@ async def language_select_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
     chosen = "ru" if query.data == "lang_sel_ru" else "en"
     await _set_lang(user_id, chosen)
     await query.edit_message_text(
-        _text("lang_welcome_" + chosen, chosen),
+        _text("lang_welcome_" + chosen, chosen, name=u.effective_user.first_name),
         parse_mode="Markdown"
     )
 
