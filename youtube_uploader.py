@@ -34,6 +34,7 @@ LAUNCH_ARGS = [
     "--disable-dev-shm-usage",
     "--disable-web-security",
     "--disable-features=IsolateOrigins,site-per-process",
+    "--headless=new",
 ]
 
 USER_AGENT = (
@@ -144,7 +145,21 @@ class YouTubeUploader:
         if "#Shorts" not in desc and "#shorts" not in desc:
             desc += "\n\n#Shorts"
 
-        pw, browser, ctx = await self._browser()
+        pw = await async_playwright().start()
+        # full Chromium + --headless=new → avoids chromium_headless_shell
+        browser = await pw.chromium.launch(
+            headless=False, args=LAUNCH_ARGS + ["--headless=new"],
+        )
+        ctx = await browser.new_context(
+            viewport={"width": 1366, "height": 768},
+            user_agent=USER_AGENT,
+            locale="en-US",
+        )
+        if self._cookies:
+            await ctx.add_cookies(self._cookies)
+        elif self.cookies_path.exists():
+            with open(self.cookies_path) as f:
+                await ctx.add_cookies(json.load(f))
         page = await ctx.new_page()
         try:
             # ── goto Studio ──
