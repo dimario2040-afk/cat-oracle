@@ -134,7 +134,7 @@ class YouTubeUploader:
         mp4_path = Path(mp4_path)
         if not mp4_path.is_file():
             raise FileNotFoundError(f"Video not found: {mp4_path}")
-        if not self.cookies_path.exists():
+        if not self._cookies and not self.cookies_path.exists():
             raise RuntimeError(
                 "Not logged in. Run login() or use login_youtube.py first."
             )
