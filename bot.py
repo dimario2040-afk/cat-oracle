@@ -1414,25 +1414,45 @@ async def give_oreshek(u,c):
 
 # ── YouTube cookies command ─────────────────────────────────────────
 
-async def yt_cookies(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    """Admin command: paste YouTube cookies JSON to store in DB."""
+async def yt_cookies_file(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    """Handle cookies.json file from admin."""
     if u.effective_user.id != ADMIN_ID:
-        await u.message.reply_text("Not allowed")
         return
-    text = u.message.text[len("/ytcookies "):].strip()
-    if not text:
-        await u.message.reply_text("Send: /ytcookies <cookies JSON>")
+    doc = u.message.document
+    if not doc or not doc.file_name.endswith(".json"):
+        await u.message.reply_text("Send a .json file")
         return
+    try:
+        f = await doc.get_file()
+        raw = await f.download_as_bytearray()
+        await _import_yt_cookies_json(raw.decode("utf-8"), u.message)
+    except Exception as e:
+        await u.message.reply_text(f"❌ File error: {e}")
+
+async def _import_yt_cookies_json(text: str, msg):
+    """Parse cookies JSON and save to DB. Called from cmd or file handler."""
     try:
         import json
         parsed = json.loads(text)
         if not isinstance(parsed, list):
             raise ValueError("must be a JSON array")
         await _save_yt_cookies(text)
-        await u.message.reply_text(f"✅ YouTube cookies saved ({len(parsed)} шт)")
+        await msg.reply_text(f"✅ YouTube cookies saved ({len(parsed)} шт)")
         logger.info(f"YouTube cookies updated by admin ({len(parsed)} cookies)")
     except Exception as e:
-        await u.message.reply_text(f"❌ Bad JSON: {e}")
+        await msg.reply_text(f"❌ Bad JSON: {e}")
+
+async def yt_cookies(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    """Admin command: paste cookies JSON inline or send a .json file."""
+    if u.effective_user.id != ADMIN_ID:
+        await u.message.reply_text("Not allowed")
+        return
+    text = u.message.text
+    idx = text.find(" ")
+    if idx != -1 and text[idx+1:].strip():
+        await _import_yt_cookies_json(text[idx+1:].strip(), u.message)
+    else:
+        await u.message.reply_text("Отправь файл youtube_cookies.json как документ")
 
 
 # ── Main ───────────────────────────────────────────────────────────
@@ -1454,6 +1474,11 @@ async def async_main():
     app.add_handler(CommandHandler("lang", lang_cmd))
     app.add_handler(CommandHandler("language", lang_cmd))
     app.add_handler(CommandHandler("ytcookies", yt_cookies))
+    # handle cookies.json file from admin
+    app.add_handler(MessageHandler(
+        filters.Document.FileExtension("json") & filters.User(user_id=ADMIN_ID),
+        yt_cookies_file
+    ))
     app.add_handler(MessageHandler(filters.VOICE,handle_voice))
     app.add_handler(MessageHandler(filters.VIDEO_NOTE,handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))

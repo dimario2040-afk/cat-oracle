@@ -25,8 +25,8 @@ async def main():
         size = len(json.loads(path.read_text(encoding="utf-8")))
         print(f"\n✅ Куки сохранены ({size} шт)")
         print(f"   Файл: {path}")
-        print(f"\n📋 Отправь боту команду:")
-        print(f"   /ytcookies <содержимое {path.name}>")
+        print(f"\n📋 Отправь файл {path} боту (как документ)")
+        print(f"   Или отправь команду: /ytcookies <содержимое {path.name}>")
     else:
         print("\n❌ Ошибка входа.")
 
