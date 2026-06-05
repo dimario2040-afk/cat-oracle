@@ -2,7 +2,7 @@
   - type: web
     name: cat-oracle
     env: python
-    buildCommand: curl -sL --max-time 120 https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ffmpeg.tar.xz && tar -xf ffmpeg.tar.xz && mv ffmpeg-*/ffmpeg ./ && chmod +x ffmpeg && ls -la ffmpeg && pip install -r requirements.txt && PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache/ms-playwright python -m playwright install --with-deps && ls -la /opt/render/.cache/ms-playwright/
+    buildCommand: curl -sL --max-time 120 https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ffmpeg.tar.xz && tar -xf ffmpeg.tar.xz && mv ffmpeg-*/ffmpeg ./ && chmod +x ffmpeg && ls -la ffmpeg && pip install -r requirements.txt && PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/playwright-browsers python -m playwright install --with-deps && ls -la /opt/render/project/src/playwright-browsers/
     startCommand: python bot.py
     runtime: python
     pythonVersion: 3.12.0
@@ -12,6 +12,6 @@
       - key: ADMIN_ID
         sync: false
       - key: PLAYWRIGHT_BROWSERS_PATH
-        value: /opt/render/.cache/ms-playwright
+        value: /opt/render/project/src/playwright-browsers
 
 
