@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .env
 sanctuary.db
+youtube_cookies/
+videos/

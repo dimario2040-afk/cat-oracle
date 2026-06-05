@@ -1,4 +1,4 @@
-import logging, os, sys, io, random, tempfile, urllib.parse, urllib.request, asyncio
+import logging, os, sys, io, random, tempfile, time, urllib.parse, urllib.request, asyncio
 import asyncpg
 from aiohttp import web
 from pathlib import Path
@@ -650,6 +650,8 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
             try: await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
             except: pass
         logger.info(f"_send_totem_video: sent to user {user_id}")
+        # YouTube Shorts auto-upload (non-blocking)
+        asyncio.create_task(_auto_upload_to_youtube(mp4, cat))
     except Exception as e:
         logger.error(f"_send_totem_video error: {e}")
         if prog_msg_id:
@@ -662,6 +664,38 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
             except:
                 try: await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
                 except: pass
+
+# ── YouTube Shorts auto-upload ──────────────────────────────────────
+
+_COOKIES_PATH = Path("youtube_cookies") / "youtube_cookies.json"
+
+async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict):
+    """Save mp4 and upload to YouTube Shorts if cookies exist."""
+    if not _COOKIES_PATH.exists():
+        return  # no login → skip
+    try:
+        videos_dir = Path("videos")
+        videos_dir.mkdir(exist_ok=True)
+        ts = int(time.time())
+        video_path = videos_dir / f"totem_{cat['id']}_{ts}.mp4"
+        video_path.write_bytes(mp4_bytes)
+
+        from youtube_uploader import YouTubeUploader
+        up = YouTubeUploader(headless=True)
+        title = f"{cat['emoji']} {cat['title']} – {cat['name']}"
+        desc = (
+            f"{cat['emoji']} {cat['name']}\n"
+            f"{cat['description']}\n\n"
+            f"Element: {cat['element']}\n"
+            f"#Shorts #Totem #CatWood"
+        )
+        ok = await up.upload_short(str(video_path), title, desc, visibility="unlisted")
+        if ok:
+            video_path.unlink(missing_ok=True)
+            logger.info(f"YouTube Shorts: uploaded {cat['name']}")
+    except Exception as e:
+        logger.error(f"YouTube Shorts error: {e}")
+
 
 async def _extract_ogg_from_video_note(mp4_bytes):
     """Extract audio from video note MP4 → returns OGG bytes (mono 16kHz)."""
