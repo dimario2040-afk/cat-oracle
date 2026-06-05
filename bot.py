@@ -651,7 +651,7 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
             except: pass
         logger.info(f"_send_totem_video: sent to user {user_id}")
         # YouTube Shorts auto-upload (non-blocking)
-        asyncio.create_task(_auto_upload_to_youtube(mp4, cat))
+        asyncio.create_task(_auto_upload_to_youtube(mp4, cat, c.bot))
     except Exception as e:
         logger.error(f"_send_totem_video error: {e}")
         if prog_msg_id:
@@ -684,8 +684,9 @@ async def _load_yt_cookies() -> str | None:
         row = await c.fetchrow("SELECT cookies_json FROM yt_auth WHERE id = 1")
         return row["cookies_json"] if row else None
 
-async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict):
-    """Save mp4 and upload to YouTube Shorts if cookies exist."""
+async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict, bot=None):
+    """Save mp4 and upload to YouTube Shorts if cookies exist.
+    Sends result notification to ADMIN_ID if bot is provided."""
     cookies_json = await _load_yt_cookies()
     if not cookies_json:
         return  # no login → skip
@@ -710,8 +711,24 @@ async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict):
         if ok:
             video_path.unlink(missing_ok=True)
             logger.info(f"YouTube Shorts: uploaded {cat['name']}")
+            if bot:
+                try:
+                    await bot.send_message(ADMIN_ID, f"✅ YouTube Shorts: {cat['name']}")
+                except:
+                    pass
+        else:
+            if bot:
+                try:
+                    await bot.send_message(ADMIN_ID, f"❌ YouTube Shorts upload failed for {cat['name']}")
+                except:
+                    pass
     except Exception as e:
         logger.error(f"YouTube Shorts error: {e}")
+        if bot:
+            try:
+                await bot.send_message(ADMIN_ID, f"❌ YouTube Shorts error: {e}")
+            except:
+                pass
 
 
 async def _extract_ogg_from_video_note(mp4_bytes):
