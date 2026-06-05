@@ -46,10 +46,23 @@ USER_AGENT = (
 # ── uploader ─────────────────────────────────────────────────────────
 
 class YouTubeUploader:
-    """Upload Shorts to YouTube via automated YouTube Studio workflow."""
+    """Upload Shorts to YouTube via automated YouTube Studio workflow.
 
-    def __init__(self, cookies_path: str | Path | None = None, headless: bool = True):
-        self.cookies_path = Path(cookies_path or COOKIES_PATH)
+    Parameters
+    ----------
+    cookies_path : path to cookies JSON file (fallback if no cookies list given)
+    cookies : list of dicts — cookie jar (takes precedence over cookies_path)
+    headless : run browser in headless mode
+    """
+
+    def __init__(
+        self,
+        cookies_path: str | Path | None = None,
+        cookies: list[dict] | None = None,
+        headless: bool = True,
+    ):
+        self.cookies_path = Path(cookies_path) if cookies_path else COOKIES_PATH
+        self._cookies = cookies
         self.headless = headless
 
     # ── context factory ──────────────────────────────────────────────
@@ -62,7 +75,10 @@ class YouTubeUploader:
             user_agent=USER_AGENT,
             locale="en-US",
         )
-        if self.cookies_path.exists():
+        # cookies from parameter → file fallback
+        if self._cookies:
+            await ctx.add_cookies(self._cookies)
+        elif self.cookies_path.exists():
             with open(self.cookies_path) as f:
                 await ctx.add_cookies(json.load(f))
         return pw, browser, ctx

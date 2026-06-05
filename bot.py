@@ -667,13 +667,30 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
 
 # ── YouTube Shorts auto-upload ──────────────────────────────────────
 
-_COOKIES_PATH = Path("youtube_cookies") / "youtube_cookies.json"
+async def _save_yt_cookies(cookies_json: str):
+    """Store YouTube cookies in DB (upsert row id=1)."""
+    pool = await get_pool()
+    async with pool.acquire() as c:
+        await c.execute("""
+            INSERT INTO yt_auth (id, cookies_json)
+            VALUES (1, $1)
+            ON CONFLICT (id) DO UPDATE SET cookies_json = EXCLUDED.cookies_json
+        """, cookies_json)
+
+async def _load_yt_cookies() -> str | None:
+    """Load YouTube cookies from DB. Returns JSON string or None."""
+    pool = await get_pool()
+    async with pool.acquire() as c:
+        row = await c.fetchrow("SELECT cookies_json FROM yt_auth WHERE id = 1")
+        return row["cookies_json"] if row else None
 
 async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict):
     """Save mp4 and upload to YouTube Shorts if cookies exist."""
-    if not _COOKIES_PATH.exists():
+    cookies_json = await _load_yt_cookies()
+    if not cookies_json:
         return  # no login → skip
     try:
+        import json
         videos_dir = Path("videos")
         videos_dir.mkdir(exist_ok=True)
         ts = int(time.time())
@@ -681,8 +698,8 @@ async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict):
         video_path.write_bytes(mp4_bytes)
 
         from youtube_uploader import YouTubeUploader
-        up = YouTubeUploader(headless=True)
-        title = f"{cat['emoji']} {cat['title']} – {cat['name']}"
+        up = YouTubeUploader(cookies=json.loads(cookies_json), headless=True)
+        title = f"{cat['title']} – {cat['name']}"
         desc = (
             f"{cat['emoji']} {cat['name']}\n"
             f"{cat['description']}\n\n"
@@ -794,6 +811,12 @@ async def init_db():
             await c.execute("ALTER TABLE user_limits ADD COLUMN IF NOT EXISTS lang TEXT DEFAULT 'ru'")
         except:
             pass
+        await c.execute("""
+            CREATE TABLE IF NOT EXISTS yt_auth(
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                cookies_json TEXT NOT NULL
+            )
+        """)
         await c.execute("INSERT INTO stats(id,total,users,starts) VALUES(1,0,0,0) ON CONFLICT DO NOTHING")
 
 async def _get_lang(user_id):
@@ -1389,6 +1412,29 @@ async def give_oreshek(u,c):
         logger.error(f"give_oreshek fallback failed: {e}")
         await u.message.reply_text(_text("oreshek_fallback", lang), parse_mode="Markdown")
 
+# ── YouTube cookies command ─────────────────────────────────────────
+
+async def yt_cookies(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    """Admin command: paste YouTube cookies JSON to store in DB."""
+    if u.effective_user.id != ADMIN_ID:
+        await u.message.reply_text("Not allowed")
+        return
+    text = u.message.text[len("/ytcookies "):].strip()
+    if not text:
+        await u.message.reply_text("Send: /ytcookies <cookies JSON>")
+        return
+    try:
+        import json
+        parsed = json.loads(text)
+        if not isinstance(parsed, list):
+            raise ValueError("must be a JSON array")
+        await _save_yt_cookies(text)
+        await u.message.reply_text(f"✅ YouTube cookies saved ({len(parsed)} шт)")
+        logger.info(f"YouTube cookies updated by admin ({len(parsed)} cookies)")
+    except Exception as e:
+        await u.message.reply_text(f"❌ Bad JSON: {e}")
+
+
 # ── Main ───────────────────────────────────────────────────────────
 
 async def async_main():
@@ -1407,6 +1453,7 @@ async def async_main():
     app.add_handler(CommandHandler("give_oreshek",give_oreshek))
     app.add_handler(CommandHandler("lang", lang_cmd))
     app.add_handler(CommandHandler("language", lang_cmd))
+    app.add_handler(CommandHandler("ytcookies", yt_cookies))
     app.add_handler(MessageHandler(filters.VOICE,handle_voice))
     app.add_handler(MessageHandler(filters.VIDEO_NOTE,handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))

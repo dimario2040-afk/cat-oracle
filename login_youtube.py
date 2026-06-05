@@ -1,10 +1,17 @@
 """
 Запусти — откроется браузер, залогинься в YouTube, нажми Enter.
-Куки сохранятся в youtube_cookies/youtube_cookies.json.
+Куки сохранятся локально в youtube_cookies/youtube_cookies.json.
+
+После входа:
+  1. Открой youtube_cookies/youtube_cookies.json
+  2. Скопируй всё содержимое (весь JSON)
+  3. Отправь боту: /ytcookies <вставь скопированный JSON>
 """
 
 import asyncio
+import json
 import logging
+from pathlib import Path
 
 from youtube_uploader import YouTubeUploader
 
@@ -14,7 +21,12 @@ async def main():
     up = YouTubeUploader(headless=False)
     ok = await up.login()
     if ok:
-        print("\n✅ Куки сохранены. Можно запускать загрузку видео.")
+        path = Path("youtube_cookies") / "youtube_cookies.json"
+        size = len(json.loads(path.read_text(encoding="utf-8")))
+        print(f"\n✅ Куки сохранены ({size} шт)")
+        print(f"   Файл: {path}")
+        print(f"\n📋 Отправь боту команду:")
+        print(f"   /ytcookies <содержимое {path.name}>")
     else:
         print("\n❌ Ошибка входа.")
 
