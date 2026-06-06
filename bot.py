@@ -1192,28 +1192,36 @@ async def premium(u,c):
 
 async def yt_cookies(u, c):
     """Admin: set YouTube cookies from inline JSON or reply to .json file."""
-    user_id = u.effective_user.id
-    if user_id != ADMIN_ID:
-        return
-    import json
-    text = u.message.text or ""
-    if text.startswith("/ytcookies "):
-        raw = text[len("/ytcookies "):].strip()
-    else:
-        await u.message.reply_text("Usage: /ytcookies <JSON array> or reply to .json file with /ytcookies")
-        return
     try:
-        cookies = json.loads(raw)
-        if not isinstance(cookies, list):
-            raise ValueError("Not a list")
-        for c in cookies:
-            if not isinstance(c, dict) or "name" not in c or "value" not in c:
-                raise ValueError("Invalid cookie format")
+        user_id = u.effective_user.id
+        if user_id != ADMIN_ID:
+            return
+        import json
+        text = u.message.text or ""
+        if text.startswith("/ytcookies "):
+            raw = text[len("/ytcookies "):].strip()
+        else:
+            await u.message.reply_text("Usage: /ytcookies <JSON array> or reply to .json file with /ytcookies")
+            return
+        try:
+            cookies = json.loads(raw)
+            if not isinstance(cookies, list):
+                raise ValueError("Not a list")
+            for c in cookies:
+                if not isinstance(c, dict) or "name" not in c or "value" not in c:
+                    raise ValueError("Invalid cookie format")
+        except Exception as e:
+            await u.message.reply_text(f"❌ Invalid JSON: {e}")
+            return
+        await _save_yt_cookies(raw)
+        await u.message.reply_text(f"✅ YouTube cookies saved ({len(cookies)} cookies)")
     except Exception as e:
-        await u.message.reply_text(f"❌ Invalid JSON: {e}")
-        return
-    await _save_yt_cookies(raw)
-    await u.message.reply_text(f"✅ YouTube cookies saved ({len(cookies)} cookies)")
+        import traceback
+        logger.error(f"yt_cookies crashed: {e}\n{traceback.format_exc()}")
+        try:
+            await u.message.reply_text(f"❌ Error: {e}")
+        except:
+            pass
 
 async def yt_cookies_file(u, c):
     """Admin: handle uploaded cookies.json file."""
@@ -1493,7 +1501,7 @@ async def async_main():
     app.add_handler(CommandHandler("ytcookies", yt_cookies))
     # handle cookies.json file from admin
     app.add_handler(MessageHandler(
-        filters.Document.FileExtension("json") & filters.User(user_id=ADMIN_ID),
+        (filters.Document.FileExtension("json") | filters.Document.FileExtension("txt")) & filters.User(user_id=ADMIN_ID),
         yt_cookies_file
     ))
     app.add_handler(MessageHandler(filters.VOICE,handle_voice))
