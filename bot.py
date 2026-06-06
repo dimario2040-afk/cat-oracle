@@ -1137,7 +1137,7 @@ async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict, bot=None, user_id
             f"Element: {cat['element']}\n"
             f"#Shorts #Totem #CatWood"
         )
-        ok = await up.upload_short(str(video_path), title, desc, visibility="unlisted")
+        ok, err = await up.upload_short(str(video_path), title, desc, visibility="unlisted")
         if ok:
             video_path.unlink(missing_ok=True)
             logger.info(f"YouTube Shorts: uploaded {cat['name']}")
@@ -1147,9 +1147,10 @@ async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict, bot=None, user_id
                 except:
                     pass
         else:
+            logger.error(f"YouTube Shorts upload failed for {cat['name']}: {err}")
             if bot:
                 try:
-                    await bot.send_message(ADMIN_ID, f"❌ YouTube Shorts upload failed for {cat['name']}")
+                    await bot.send_message(ADMIN_ID, f"❌ YouTube Shorts failed: {err}")
                 except:
                     pass
     except Exception as e:

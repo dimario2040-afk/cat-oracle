@@ -42,16 +42,17 @@ class YouTubeUploader:
         title: str,
         description: str = "",
         visibility: str = "unlisted",
-    ) -> bool:
+    ) -> tuple[bool, str]:
         """Upload a video to YouTube as a Short.
 
-        Returns True on success.
+        Returns (True, "") on success, (False, error_msg) on failure.
         """
         mp4_path = Path(mp4_path)
         if not mp4_path.is_file():
-            raise FileNotFoundError(f"Video not found: {mp4_path}")
+            return False, f"File not found: {mp4_path}"
         if not self._cookies:
-            raise RuntimeError("Not logged in. Provide cookies via /ytcookies.")
+            return False, "No cookies provided"
+
 
         # Ensure #Shorts in description
         desc = description.strip()
@@ -86,11 +87,12 @@ class YouTubeUploader:
             await loop.run_in_executor(None, lambda: uploader.upload(str(mp4_path), metadata))
 
             logger.info(f"✅ Published: {title}")
-            return True
+            return True, ""
 
         except Exception as e:
-            logger.error(f"Upload failed: {e}")
-            return False
+            err_msg = str(e)
+            logger.error(f"Upload failed: {err_msg}")
+            return False, err_msg
         finally:
             Path(cookies_path).unlink(missing_ok=True)
 
@@ -98,7 +100,7 @@ class YouTubeUploader:
 # ── direct call ──────────────────────────────────────────────────────
 
 async def upload_video(mp4_path: str, title: str, description: str = "",
-                       visibility: str = "unlisted") -> bool:
+                       visibility: str = "unlisted") -> tuple[bool, str]:
     """Shortcut: create uploader and upload in one call."""
     up = YouTubeUploader()
     return await up.upload_short(mp4_path, title, description, visibility)
