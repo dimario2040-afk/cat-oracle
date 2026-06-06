@@ -34,20 +34,9 @@ TIMEOUT = aiohttp.ClientTimeout(total=300)
 
 # ── helpers ──────────────────────────────────────────────────────────
 
-def _cookie_jar(cookies: list[dict]) -> aiohttp.CookieJar:
-    """Convert a list of cookie dicts into an aiohttp CookieJar."""
-    jar = aiohttp.CookieJar()
-    for c in cookies:
-        name = c.get("name", "")
-        value = c.get("value", "")
-        domain = c.get("domain", ".youtube.com")
-        # Build URL from cookie domain for aiohttp CookieJar
-        if domain.startswith("."):
-            url = f"https://www{domain}"
-        else:
-            url = f"https://{domain}"
-        jar.update_cookies({name: value}, url)
-    return jar
+def _cookie_dict(cookies: list[dict]) -> dict[str, str]:
+    """Convert cookies list to a simple dict for aiohttp ClientSession."""
+    return {c["name"]: c["value"] for c in cookies if "name" in c and "value" in c}
 
 
 def _make_context(client_version: str | None = None) -> dict:
@@ -287,11 +276,11 @@ async def upload_short(
     file_size = mp4_path.stat().st_size
     file_name = mp4_path.name
 
-    # ── build cookie jar ──
-    jar = _cookie_jar(cookies)
+    # ── build cookie dict for session ──
+    cookie_dict = _cookie_dict(cookies)
 
     async with aiohttp.ClientSession(
-        cookies=jar,
+        cookies=cookie_dict,
         headers={"User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9"},
         timeout=TIMEOUT,
     ) as session:
