@@ -46,14 +46,6 @@ _RE_DELEGATED_SESSION_ID = re.compile(r'"DELEGATED_SESSION_ID":"([^"]*)"')
 CLIENT_VERSION = "1.20231215.01.00"
 
 
-def _sapisid_hash(sapisid_value: str, origin: str = "https://www.youtube.com") -> str:
-    """Generate SAPISIDHASH authorization header value."""
-    ts = str(int(time.time()))
-    msg = f"{ts} {sapisid_value} {origin}"
-    h = sha1(msg.encode("utf-8")).hexdigest()
-    return f"SAPISIDHASH {ts}_{h}"
-
-
 def _prepare_cookies(
     raw_cookies: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -97,33 +89,63 @@ class YouTubeCookieAuth:
         """Configure requests session with cookie jar and auth headers."""
         prepared = _prepare_cookies(raw_cookies)
 
-        # Set cookies into requests session
+        # Set cookies using http.cookiejar.Cookie for full compatibility
+        from http.cookiejar import Cookie
         for c in prepared:
+            name = c["name"]
+            value = c["value"]
             domain = c.get("domain", ".youtube.com")
-            # requests doesn't like leading dot for cookie domains
+            # requests cookies use domain without leading dot
             requests_domain = domain.lstrip(".")
-            self._session.cookies.set(
-                c["name"],
-                c["value"],
+            cookie_obj = Cookie(
+                version=0,
+                name=name,
+                value=value,
+                port=None,
+                port_specified=False,
                 domain=requests_domain,
+                domain_specified=True,
+                domain_initial_dot=domain.startswith("."),
                 path=c.get("path", "/"),
-                secure=c.get("secure", True),
+                path_specified=True,
+                secure=c.get("secure", False),
+                expires=None,
+                discard=True,
+                comment=None,
+                comment_url=None,
+                rest={"HttpOnly": c.get("httpOnly", False)},
+                rfc2109=False,
             )
+            self._session.cookies.set_cookie(cookie_obj)
 
-        # Set auth headers
-        sapisid_val = None
-        for c in prepared:
-            if c["name"] == "SAPISID":
-                sapisid_val = c["value"]
-                break
+        # Collect SAPISID values for all three auth schemes (like yt-dlp does)
+        by_name = {c["name"]: c["value"] for c in prepared}
+        sapisid = by_name.get("SAPISID") or by_name.get("__Secure-3PAPISID")
+        _1papisid = by_name.get("__Secure-1PAPISID")
+        _3papisid = by_name.get("__Secure-3PAPISID")
 
-        if not sapisid_val:
-            raise ValueError("SAPISID cookie not found after preparation")
+        if not sapisid:
+            raise ValueError("No SAPISID or __Secure-3PAPISID cookie found")
 
-        origin = "https://www.youtube.com"
-        auth = _sapisid_hash(sapisid_val, origin)
+        # Use studio.youtube.com as origin (exactly like youtube-up)
+        origin = "https://studio.youtube.com"
+        ts = str(int(time.time()))
+
+        auth_parts = []
+        # SAPISIDHASH (primary)
+        hash1 = sha1(f"{ts} {sapisid} {origin}".encode("utf-8")).hexdigest()
+        auth_parts.append(f"SAPISIDHASH {ts}_{hash1}")
+        # SAPISID1PHASH (optional)
+        if _1papisid:
+            hash2 = sha1(f"{ts} {_1papisid} {origin}".encode("utf-8")).hexdigest()
+            auth_parts.append(f"SAPISID1PHASH {ts}_{hash2}")
+        # SAPISID3PHASH (optional)
+        if _3papisid:
+            hash3 = sha1(f"{ts} {_3papisid} {origin}".encode("utf-8")).hexdigest()
+            auth_parts.append(f"SAPISID3PHASH {ts}_{hash3}")
+
         self._session.headers.update({
-            "Authorization": auth,
+            "Authorization": " ".join(auth_parts),
             "x-origin": origin,
             "user-agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -131,7 +153,8 @@ class YouTubeCookieAuth:
                 "Chrome/120.0.0.0 Safari/537.36"
             ),
         })
-        logger.info("Session configured with SAPISIDHASH auth")
+        logger.info(f"Session configured: {len(auth_parts)} SAPISID hashes, "
+                     f"{len(prepared)} cookies")
 
     def get(self, url: str, **kwargs) -> requests.Response:
         return self._session.get(url, **kwargs)
@@ -216,18 +239,27 @@ class YouTubeUploader:
         auth = self._auth
         assert auth is not None
 
-        r = auth.get("https://www.youtube.com/upload", allow_redirects=True)
+        logger.info("Requesting youtube.com/upload to validate session...")
+
+        # Use youtube.com without www, matching youtube-up behavior
+        r = auth.get("https://youtube.com/upload", allow_redirects=True)
+
+        logger.info(f"Response: status={r.status_code}, final_url={r.url}")
+        logger.info(f"Response headers: {dict(r.headers)}")
+        logger.info(f"Response body (first 500): {r.text[:500]}")
+
         r.raise_for_status()
 
         # Check we landed on studio
         if "studio.youtube.com/channel" not in r.url:
-            # If we got redirected away, try with allow_redirects=False
+            logger.warning(f"Redirect target is NOT studio: {r.url}")
+            if "accounts.google.com" in r.url:
+                raise RuntimeError("Redirected to Google login - cookies expired or invalid")
             if "studio.youtube.com/channel" not in r.text:
                 raise RuntimeError(
                     "Could not log in to YouTube account. Try getting new cookies"
                 )
 
-        # Extract data from page HTML
         html = r.text
 
         m = _RE_CHANNEL_ID.search(r.url)
