@@ -15,9 +15,17 @@ logger = logging.getLogger("youtube_uploader")
 
 
 def json_to_netscape(json_cookies: list[dict[str, Any]]) -> str:
-    """Convert JSON cookie array to Netscape cookies.txt format."""
+    """Convert JSON cookie array to Netscape cookies.txt format.
+    Deduplicates by cookie name (keeps first occurrence).
+    """
     lines = ["# Netscape HTTP Cookie File"]
+    seen_names = set()
     for c in json_cookies:
+        name = c["name"]
+        if name in seen_names:
+            continue
+        seen_names.add(name)
+        
         domain = c.get("domain", "")
         host_only = c.get("hostOnly", False)
         # Netscape: if host_only=False (domain cookie), domain MUST start with dot and flag=TRUE
@@ -30,7 +38,6 @@ def json_to_netscape(json_cookies: list[dict[str, Any]]) -> str:
         path = c.get("path", "/")
         secure = "TRUE" if c.get("secure", False) else "FALSE"
         expires = str(int(c.get("expirationDate", 0))) if c.get("expirationDate") else "0"
-        name = c["name"]
         value = c["value"]
         lines.append(f"{domain}\t{flag}\t{path}\t{secure}\t{expires}\t{name}\t{value}")
     return "\n".join(lines)
