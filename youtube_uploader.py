@@ -1,6 +1,7 @@
 """
 YouTube Shorts uploader via Playwright (browser automation).
-Uses system Chromium (installed via apt on Render), no bundled browser needed.
+Uses Playwright's bundled Chromium installed via PLAYWRIGHT_BROWSERS_PATH
+(env var set in render.yaml, installed during buildCommand).
 
 Usage:
     from youtube_uploader import YouTubeUploader
@@ -19,23 +20,24 @@ from playwright.async_api import async_playwright
 
 logger = logging.getLogger("youtube_uploader")
 
+# Ensure PLAYWRIGHT_BROWSERS_PATH env var is set (fallback if render.yaml didn't)
+_BROWSERS_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+if not _BROWSERS_PATH:
+    _BROWSERS_PATH = str(Path.cwd() / "playwright-browsers")
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _BROWSERS_PATH
 
-def _find_chromium() -> str | None:
-    """Find system Chromium/Chrome binary."""
-    candidates = [
-        "/usr/bin/chromium-browser",      # Render / Debian/Ubuntu
-        "/usr/bin/chromium",               # Some distros
-        "/snap/bin/chromium",              # Snap install
-        # Windows paths (local dev)
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        str(Path(os.environ.get("LOCALAPPDATA", "")) / "Google" / "Chrome" / "Application" / "chrome.exe"),
-    ]
-    for p in candidates:
-        if Path(p).exists():
-            logger.info(f"Found Chromium/Chrome at: {p}")
-            return p
-    return None
+# Ensure browsers are installed
+_CACHE = Path(_BROWSERS_PATH)
+_CHROMIUM_DIRS = list(_CACHE.glob("chromium-*")) if _CACHE.exists() else []
+if not _CHROMIUM_DIRS:
+    logger.info("Chromium not found — installing…")
+    import subprocess
+    subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"],
+        check=False, capture_output=True,
+    )
+    _CHROMIUM_DIRS = list(_CACHE.glob("chromium-*")) if _CACHE.exists() else []
+    logger.info(f"Chromium installed: {len(_CHROMIUM_DIRS)} dirs found")
 
 
 LAUNCH_ARGS = [
@@ -57,7 +59,7 @@ USER_AGENT = (
 class YouTubeUploader:
     """Upload Shorts to YouTube via automated YouTube Studio workflow.
 
-    Uses system Chromium (not Playwright's bundled browser).
+    Uses Playwright's bundled Chromium (no system browser needed).
     """
 
     def __init__(
@@ -69,19 +71,14 @@ class YouTubeUploader:
         self.cookies_path = Path(cookies_path) if cookies_path else Path("youtube_cookies") / "youtube_cookies.json"
         self._cookies = cookies
         self.headless = headless
-        self._chrome_path = _find_chromium()
 
     async def _browser(self):
-        """Launch browser with system Chromium."""
+        """Launch Playwright's bundled Chromium."""
         pw = await async_playwright().start()
-        launch_opts = {
-            "headless": self.headless,
-            "args": LAUNCH_ARGS,
-        }
-        if self._chrome_path:
-            launch_opts["executable_path"] = self._chrome_path
-
-        browser = await pw.chromium.launch(**launch_opts)
+        browser = await pw.chromium.launch(
+            headless=False,  # full Chromium (not headless_shell)
+            args=LAUNCH_ARGS,
+        )
         ctx = await browser.new_context(
             viewport={"width": 1366, "height": 768},
             user_agent=USER_AGENT,
