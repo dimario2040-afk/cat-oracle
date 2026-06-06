@@ -1,5 +1,4 @@
 # Local YouTube uploader dependencies
 # Install: pip install -r local_requirements.txt && playwright install chromium
-telethon>=1.36
 playwright>=1.46
 browser-cookie3>=0.19
