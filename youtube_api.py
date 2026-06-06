@@ -248,7 +248,7 @@ async def upload_short(
     description: str = "",
     cookies: list[dict] | None = None,
     visibility: str = "unlisted",
-) -> bool:
+) -> tuple[bool, str]:
     """Upload a video to YouTube Shorts via HTTP-only internal API.
 
     Parameters
@@ -259,14 +259,14 @@ async def upload_short(
     cookies : list of cookie dicts from DB
     visibility : 'public' | 'unlisted' | 'private'
 
-    Returns True on success.
+    Returns (True, "") on success, (False, "reason") on failure.
     """
     mp4_path = Path(mp4_path)
     if not mp4_path.is_file():
-        raise FileNotFoundError(f"Video not found: {mp4_path}")
+        return False, f"Video not found: {mp4_path}"
 
     if not cookies:
-        raise RuntimeError("No cookies provided — run /ytcookies first")
+        return False, "No cookies provided — run /ytcookies first"
 
     # Ensure #Shorts in description
     desc = description.strip()
@@ -288,8 +288,7 @@ async def upload_short(
         logger.info("Fetching YouTube page for API tokens…")
         api_key, id_token, client_version = await _fetch_tokens(session)
         if not id_token:
-            logger.error("Could not extract ID_TOKEN — session may be expired")
-            return False
+            return False, "Could not extract ID_TOKEN — session expired or invalid cookies"
 
         logger.info("Creating upload session…")
         session_result = await _create_upload_session(
@@ -297,40 +296,36 @@ async def upload_short(
             file_size, file_name,
         )
         if not session_result:
-            return False
+            return False, "Failed to create upload session (check logs)"
 
         # Extract upload URL from response
         scotty_resource = session_result.get("scottyResourceId")
         upload_url = None
-        # The response may contain the upload URL in different fields
         if "uploadUrl" in session_result:
             upload_url = session_result["uploadUrl"]
         elif "url" in session_result.get("scottyResource", {}):
             upload_url = session_result["scottyResource"]["url"]
 
         if not upload_url and scotty_resource:
-            # Build URL from scotty resource pattern
             upload_url = f"https://upload.youtube.com/upload/scotty/{scotty_resource}"
 
         if not upload_url:
-            logger.error(f"No upload URL in response: {json.dumps(session_result, default=str)[:300]}")
-            return False
+            err = json.dumps(session_result, default=str)[:300]
+            return False, f"No upload URL in response: {err}"
 
         # ── Step 2: Upload binary ──
         logger.info(f"Uploading binary ({file_size} bytes)…")
         upload_ok = await _upload_binary(upload_url, mp4_path)
         if not upload_ok:
-            return False
+            return False, "Binary upload to YouTube failed (check logs)"
 
         # Extract video ID from session response
         video_id = session_result.get("encryptedVideoId") or session_result.get("videoId")
         if not video_id:
-            # Try to find it in the response
             video_id = session_result.get("scottyResource", {}).get("videoId")
 
         if not video_id:
-            logger.error("Could not extract video ID from session response")
-            return False
+            return False, "Could not extract video ID from session response"
 
         # ── Step 3: Set metadata and publish ──
         logger.info(f"Setting metadata for video {video_id}…")
@@ -339,13 +334,13 @@ async def upload_short(
             video_id, title[:100], desc, visibility,
         )
         if not meta_ok:
-            return False
+            return False, "Failed to set video metadata (check logs)"
 
         # ── Step 4: Thumbnail (best-effort) ──
         await _set_thumbnail(session, api_key, id_token, client_version or "2.20250101.00.00", video_id)
 
         logger.info(f"✅ YouTube Shorts published: {title}")
-        return True
+        return True, ""
 
 
 # ── direct call ──────────────────────────────────────────────────────
@@ -356,7 +351,7 @@ async def upload_video(
     description: str = "",
     cookies: list[dict] | None = None,
     visibility: str = "unlisted",
-) -> bool:
+) -> tuple[bool, str]:
     """Shortcut: upload in one call."""
     return await upload_short(mp4_path, title, description, cookies, visibility)
 
@@ -377,4 +372,5 @@ if __name__ == "__main__":
     # For CLI usage, load cookies from file
     cookies_path = Path("youtube_cookies") / "youtube_cookies.json"
     cookies = json.loads(cookies_path.read_text()) if cookies_path.exists() else None
-    asyncio.run(upload_video(mp4, title, desc, cookies, vis))
+    ok, reason = asyncio.run(upload_video(mp4, title, desc, cookies, vis))
+    print(f"{'✅' if ok else '❌'} {reason if reason else 'Upload OK'}")
