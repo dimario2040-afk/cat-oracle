@@ -16,7 +16,6 @@ import asyncio
 import json
 import logging
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -47,24 +46,28 @@ USER_AGENT = (
 
 # ── uploader ─────────────────────────────────────────────────────────
 
-def _ensure_browsers():
-    """Install Playwright browsers at runtime if missing."""
+async def _ensure_browsers():
+    """Install Playwright browsers at runtime if missing (async)."""
     cache = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "~/.cache/ms-playwright")).expanduser()
     found = list(cache.glob("chromium-*"))
     if found:
         logger.info(f"Playwright browsers found: {found[0].name}")
         return
     logger.info("Playwright browsers not found — installing...")
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "playwright", "install", "chromium",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
     try:
-        subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
-            check=True, timeout=300, capture_output=True,
-        )
-        logger.info("Playwright browsers installed")
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode() if e.stderr else ""
-        logger.error(f"playwright install failed: {stderr[:200]}")
-    except subprocess.TimeoutExpired:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        if proc.returncode == 0:
+            logger.info("Playwright browsers installed")
+        else:
+            stderr_text = stderr.decode("utf-8", errors="replace")[:200]
+            logger.error(f"playwright install failed: {stderr_text}")
+    except asyncio.TimeoutError:
+        proc.kill()
         logger.error("playwright install timed out after 300s")
 
 
@@ -91,7 +94,7 @@ class YouTubeUploader:
     # ── context factory ──────────────────────────────────────────────
 
     async def _browser(self):
-        _ensure_browsers()
+        await _ensure_browsers()
         pw = await async_playwright().start()
         browser = await pw.chromium.launch(headless=self.headless, args=LAUNCH_ARGS)
         ctx = await browser.new_context(
@@ -169,7 +172,7 @@ class YouTubeUploader:
             desc += "\n\n#Shorts"
 
         # Ensure browsers are installed (install at runtime if missing)
-        _ensure_browsers()
+        await _ensure_browsers()
 
         pw = await async_playwright().start()
         # full Chromium + --headless=new → avoids chromium_headless_shell
