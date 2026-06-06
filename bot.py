@@ -1,4 +1,4 @@
-import logging, os, sys, io, random, tempfile, urllib.parse, urllib.request, asyncio, json
+import logging, os, sys, io, random, tempfile, urllib.parse, urllib.request, asyncio, json, uuid, time
 import asyncpg
 from aiohttp import web
 from pathlib import Path
@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8827616686:AAFwdGgz5dkKEe_VbXvfHHecZk3Se0oOPek")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
 BOT_USERNAME = "catwood_bot"
+UPLOAD_CHANNEL_ID = os.environ.get("UPLOAD_CHANNEL_ID", "")
+
+# YouTube upload queue (callback data → video bytes + cat metadata)
+_yt_queue: dict[str, dict] = {}
+_YT_QUEUE_TTL = 600  # auto-clean after 10 min
 
 # ── cats: Russian ──────────────────────────────────────────────────
 
@@ -639,36 +644,25 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
         caption = _text("video_caption_text", lang,
                         name=cat['name'],
                         ref=f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}")
+        # YouTube queue button – store video in cache
+        yt_token = str(uuid.uuid4())
+        _yt_queue[yt_token] = {"mp4": mp4, "cat": cat, "user_id": user_id, "ts": time.time()}
+        yt_btn_text = "📤 Отправить в YouTube" if lang == "ru" else "📤 Send to YouTube"
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(yt_btn_text, callback_data=f"ytq_{yt_token}")]
+        ]) if UPLOAD_CHANNEL_ID else None
         await c.bot.send_video(
             chat_id=chat_id,
             video=io.BytesIO(mp4),
             caption=caption,
             reply_to_message_id=reply_to,
+            reply_markup=keyboard,
             write_timeout=120, read_timeout=120,
         )
         if prog_msg_id:
             try: await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
             except: pass
         logger.info(f"_send_totem_video: sent to user {user_id}")
-        # Also forward video to admin with metadata for local YouTube uploader
-        try:
-            admin_caption = (
-                f"{cat['emoji']} {cat['title']} – {cat['name']}\n"
-                f"{cat['description']}\n"
-                f"Element: {cat['element']} | #{cat['name'].replace(' ', '')}\n\n"
-                f"#youtube_upload\n"
-                f"TITLE: {cat['title']} – {cat['name']}\n"
-                f"DESC: {cat['emoji']} {cat['name']} – {cat['description']} | Element: {cat['element']}\n"
-                f"VISIBILITY: unlisted"
-            )
-            await c.bot.send_document(
-                chat_id=ADMIN_ID,
-                document=mp4,
-                filename=f"totem_{cat['id']}.mp4",
-                caption=admin_caption,
-            )
-        except Exception as e:
-            logger.error(f"Failed to forward video to admin: {e}")
     except Exception as e:
         logger.error(f"_send_totem_video error: {e}")
         if prog_msg_id:
@@ -1106,6 +1100,60 @@ async def language_select_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+async def yt_queue_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    """Handle '📤 Отправить в YouTube' button → forward video to upload channel."""
+    query = u.callback_query
+    await query.answer()
+    token = query.data[4:]  # "ytq_<uuid>"
+    data = _yt_queue.pop(token, None)
+    if not data:
+        try:
+            await query.edit_message_text("❌ Видео устарело, отправьте голосовое заново")
+        except Exception:
+            pass
+        return
+    channel_id = UPLOAD_CHANNEL_ID
+    if not channel_id:
+        logger.warning("UPLOAD_CHANNEL_ID not set")
+        return
+    try:
+        channel_id = int(channel_id)
+    except ValueError:
+        channel_id = channel_id  # could be @username
+    mp4 = data["mp4"]
+    cat = data["cat"]
+    lang = "ru"
+    try:
+        lang = await _get_lang(data["user_id"]) or "ru"
+    except Exception:
+        pass
+    # Build caption with full metadata for YouTube upload
+    title = f"{cat['emoji']} {cat['title']} – {cat['name']}"
+    desc = f"{cat['description']}\nElement: {cat['element']}\n#Shorts #CatWood"
+    caption = (
+        f"{title}\n\n{desc}\n\n"
+        f"#youtube_upload\n"
+        f"TITLE: {cat['title']} – {cat['name']}\n"
+        f"DESC: {cat['emoji']} {cat['name']} – {cat['description']} | Element: {cat['element']}\n"
+        f"VISIBILITY: unlisted | USER: {data['user_id']}"
+    )
+    try:
+        await c.bot.send_video(
+            chat_id=channel_id,
+            video=io.BytesIO(mp4),
+            caption=caption,
+        )
+        ok_text = "✅ Отправлено в очередь на YouTube!" if lang == "ru" else "✅ Queued for YouTube!"
+        await query.edit_message_text(ok_text)
+        logger.info(f"Video queued to YouTube channel by user {data['user_id']}: {cat['name']}")
+    except Exception as e:
+        err = f"❌ Ошибка: {e}" if lang == "ru" else f"❌ Error: {e}"
+        logger.error(f"Failed to send to upload channel: {e}")
+        try:
+            await query.edit_message_text(err)
+        except Exception:
+            pass
+
 async def premium(u,c):
     user_id = u.effective_user.id
     lang = await _get_user_lang(u)
@@ -1395,6 +1443,7 @@ async def async_main():
     app.add_handler(MessageHandler(filters.VIDEO_NOTE,handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
     app.add_handler(CallbackQueryHandler(language_select_callback, pattern="^lang_sel_"))
+    app.add_handler(CallbackQueryHandler(yt_queue_callback, pattern="^ytq_"))
     app.add_handler(CallbackQueryHandler(save_card, pattern="^save_card$"))
     app.add_handler(CallbackQueryHandler(buy_callback, pattern="^buy_"))
     app.add_handler(CallbackQueryHandler(donate_show_callback, pattern="^donate$"))
