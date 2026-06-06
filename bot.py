@@ -700,7 +700,8 @@ async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict, bot=None, user_id
         video_path = videos_dir / f"totem_{cat['id']}_{ts}.mp4"
         video_path.write_bytes(mp4_bytes)
 
-        from youtube_api import upload_short as yt_upload
+        from youtube_uploader import YouTubeUploader
+        up = YouTubeUploader(cookies=json.loads(cookies_json), headless=True)
         title = f"{cat['title']} – {cat['name']}"
         desc = (
             f"{cat['emoji']} {cat['name']}\n"
@@ -708,7 +709,7 @@ async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict, bot=None, user_id
             f"Element: {cat['element']}\n"
             f"#Shorts #Totem #CatWood"
         )
-        ok, reason = await yt_upload(str(video_path), title, desc, cookies=json.loads(cookies_json), visibility="unlisted")
+        ok = await up.upload_short(str(video_path), title, desc, visibility="unlisted")
         if ok:
             video_path.unlink(missing_ok=True)
             logger.info(f"YouTube Shorts: uploaded {cat['name']}")
@@ -718,10 +719,9 @@ async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict, bot=None, user_id
                 except:
                     pass
         else:
-            logger.error(f"YouTube Shorts upload failed: {reason}")
             if bot:
                 try:
-                    await bot.send_message(ADMIN_ID, f"❌ YouTube Shorts: {cat['name']} — {reason}")
+                    await bot.send_message(ADMIN_ID, f"❌ YouTube Shorts upload failed for {cat['name']}")
                 except:
                     pass
     except Exception as e:

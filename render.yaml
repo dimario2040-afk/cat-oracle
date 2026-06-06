@@ -2,7 +2,7 @@
   - type: web
     name: cat-oracle
     env: python
-    buildCommand: curl -sL --max-time 120 https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ffmpeg.tar.xz && tar -xf ffmpeg.tar.xz && mv ffmpeg-*/ffmpeg ./ && chmod +x ffmpeg && ls -la ffmpeg && pip install -r requirements.txt
+    buildCommand: apt-get update && apt-get install -y chromium-browser && curl -sL --max-time 120 https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ffmpeg.tar.xz && tar -xf ffmpeg.tar.xz && mv ffmpeg-*/ffmpeg ./ && chmod +x ffmpeg && pip install -r requirements.txt
     startCommand: python bot.py
     runtime: python
     pythonVersion: 3.12.0
