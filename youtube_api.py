@@ -38,10 +38,15 @@ def _cookie_jar(cookies: list[dict]) -> aiohttp.CookieJar:
     """Convert a list of cookie dicts into an aiohttp CookieJar."""
     jar = aiohttp.CookieJar()
     for c in cookies:
-        jar.update_cookies(
-            {c["name"]: c["value"]},
-            aiohttp.http_url(c.get("domain", ".youtube.com")),
-        )
+        name = c.get("name", "")
+        value = c.get("value", "")
+        domain = c.get("domain", ".youtube.com")
+        # Build URL from cookie domain for aiohttp CookieJar
+        if domain.startswith("."):
+            url = f"https://www{domain}"
+        else:
+            url = f"https://{domain}"
+        jar.update_cookies({name: value}, url)
     return jar
 
 
