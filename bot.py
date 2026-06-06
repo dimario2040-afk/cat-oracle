@@ -766,8 +766,7 @@ async def init_db():
         await c.execute("""
             CREATE TABLE IF NOT EXISTS yt_auth(
                 id INTEGER PRIMARY KEY DEFAULT 1,
-                cookies_json TEXT NOT NULL,
-                updated_ts TIMESTAMP DEFAULT NOW()
+                cookies_json TEXT NOT NULL
             )
         """)
 
@@ -792,8 +791,8 @@ async def _save_yt_cookies(cookies_json: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO yt_auth(id, cookies_json, updated_ts) VALUES(1, $1, NOW())
-            ON CONFLICT(id) DO UPDATE SET cookies_json=$1, updated_ts=NOW()
+            INSERT INTO yt_auth(id, cookies_json) VALUES(1, $1)
+            ON CONFLICT(id) DO UPDATE SET cookies_json=$1
         """, cookies_json)
 
 async def _load_yt_cookies() -> str | None:
