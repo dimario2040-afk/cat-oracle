@@ -169,7 +169,7 @@ class YouTubeUploader:
             desc += "\n\n#Shorts"
 
         # Ensure browsers are installed (install at runtime if missing)
-        _install_browsers()
+        _ensure_browsers()
 
         pw = await async_playwright().start()
         # full Chromium + --headless=new → avoids chromium_headless_shell
