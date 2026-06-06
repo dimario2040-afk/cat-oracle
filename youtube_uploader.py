@@ -18,8 +18,14 @@ def json_to_netscape(json_cookies: list[dict[str, Any]]) -> str:
     """Convert JSON cookie array to Netscape cookies.txt format."""
     lines = ["# Netscape HTTP Cookie File"]
     for c in json_cookies:
-        domain = c.get("domain", "").lstrip(".")
+        domain = c.get("domain", "")
         host_only = c.get("hostOnly", False)
+        # Netscape: if host_only=False (domain cookie), domain MUST start with dot and flag=TRUE
+        # if host_only=True, no leading dot and flag=FALSE
+        if not host_only and not domain.startswith("."):
+            domain = "." + domain
+        elif host_only and domain.startswith("."):
+            domain = domain.lstrip(".")
         flag = "FALSE" if host_only else "TRUE"
         path = c.get("path", "/")
         secure = "TRUE" if c.get("secure", False) else "FALSE"
