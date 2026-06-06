@@ -893,6 +893,8 @@ async def _add_bonus(user_id, amount=1):
 # ── Handlers ───────────────────────────────────────────────────────
 
 async def start(u,c):
+    if not u.effective_user:
+        return  # Ignore channel_post / anonymous updates
     user_id = u.effective_user.id
     await record_start()
     args = c.args
@@ -1144,13 +1146,14 @@ async def yt_queue_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
             caption=caption,
         )
         ok_text = "✅ Отправлено в очередь на YouTube!" if lang == "ru" else "✅ Queued for YouTube!"
-        await query.edit_message_text(ok_text)
+        await query.answer(ok_text, show_alert=True)
+        await query.edit_message_reply_markup(None)
         logger.info(f"Video queued to YouTube channel by user {data['user_id']}: {cat['name']}")
     except Exception as e:
         err = f"❌ Ошибка: {e}" if lang == "ru" else f"❌ Error: {e}"
         logger.error(f"Failed to send to upload channel: {e}")
         try:
-            await query.edit_message_text(err)
+            await query.answer(err, show_alert=True)
         except Exception:
             pass
 
