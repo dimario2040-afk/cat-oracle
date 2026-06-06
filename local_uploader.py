@@ -37,7 +37,7 @@ logger = logging.getLogger("local_uploader")
 
 YT_BOT_TOKEN = os.environ.get("YT_BOT_TOKEN", "")
 DOWNLOAD_DIR = Path(os.environ.get("DOWNLOAD_DIR", "downloads"))
-VISIBILITY = os.environ.get("YT_VISIBILITY", "unlisted")
+VISIBILITY = os.environ.get("YT_VISIBILITY", "public")
 POLL_INTERVAL = 5
 CLEANUP_AFTER_UPLOAD = True
 
@@ -67,37 +67,51 @@ def parse_yt_caption(caption: str) -> dict:
 # ═══════════════════════════════════════════════════════════════════════
 
 def get_chrome_cookies() -> list[dict]:
-    """Extract YouTube cookies from Chrome via browser-cookie3."""
+    """Extract YouTube cookies from browser via browser-cookie3.
+    Tries multiple browsers: Edge (best on Windows), Chrome, Firefox, Opera.
+    """
     import browser_cookie3
     cookies = []
-    for domain in [".youtube.com", ".google.com"]:
-        try:
-            cj = browser_cookie3.chrome(domain_name=domain)
-            for c in cj:
-                cookies.append({
-                    "name": c.name,
-                    "value": c.value,
-                    "domain": ".youtube.com",
-                    "path": "/",
-                    "secure": c.secure,
-                    "httpOnly": getattr(c, "_rest", {}).get("HttpOnly", False),
-                    "sameSite": "Lax",
-                })
-        except Exception as e:
-            logger.debug(f"No {domain} cookies: {e}")
+    browsers = [
+        ("Edge", lambda d: browser_cookie3.edge(domain_name=d)),
+        ("Chrome", lambda d: browser_cookie3.chrome(domain_name=d)),
+        ("Firefox", lambda d: browser_cookie3.firefox(domain_name=d)),
+        ("Opera", lambda d: browser_cookie3.opera(domain_name=d)),
+        ("Chromium", lambda d: browser_cookie3.chromium(domain_name=d)),
+    ]
+    for name, loader in browsers:
+        for domain in [".youtube.com", ".google.com"]:
+            try:
+                cj = loader(domain)
+                count = 0
+                for c in cj:
+                    cookies.append({
+                        "name": c.name,
+                        "value": c.value,
+                        "domain": ".youtube.com",
+                        "path": "/",
+                        "secure": c.secure,
+                        "httpOnly": getattr(c, "_rest", {}).get("HttpOnly", False),
+                        "sameSite": "Lax",
+                    })
+                    count += 1
+                if count > 0:
+                    logger.info(f"  {name}: {count} cookies ({domain})")
+            except Exception as e:
+                logger.debug(f"  {name} ({domain}): {e}")
     by_name = {c["name"]: c for c in cookies}
-    logger.info(f"Extracted {len(by_name)} cookies from Chrome")
+    logger.info(f"Total: {len(by_name)} unique cookies from all browsers")
     return list(by_name.values())
 
 
 def upload_to_youtube(video_path: str, title: str, description: str, visibility: str = "unlisted"):
-    """Upload video to YouTube Studio via Playwright + Chrome cookies."""
+    """Upload video to YouTube Studio via Playwright.
+    Tries cookies first; if none, waits for manual login.
+    """
     from playwright.sync_api import sync_playwright
 
-    logger.info("🍪 Getting Chrome cookies...")
+    logger.info("🍪 Getting browser cookies...")
     cookies = get_chrome_cookies()
-    if not cookies:
-        raise RuntimeError("Нет кук из Chrome. Убедись что Chrome открыт и ты залогинен в YouTube.")
 
     visibility = visibility.lower()
     if visibility not in ("public", "unlisted", "private"):
@@ -117,7 +131,11 @@ def upload_to_youtube(video_path: str, title: str, description: str, visibility:
                 "Chrome/120.0.0.0 Safari/537.36"
             ),
         )
-        context.add_cookies(cookies)
+        if cookies:
+            logger.info(f"☕ Injecting {len(cookies)} cookies...")
+            context.add_cookies(cookies)
+        else:
+            logger.warning("⚠️  No cookies found — will need manual login")
         page = context.new_page()
 
         try:
@@ -126,9 +144,16 @@ def upload_to_youtube(video_path: str, title: str, description: str, visibility:
             page.wait_for_timeout(4000)
 
             if "accounts.google.com" in page.url or "ServiceLogin" in page.url:
-                raise RuntimeError(
-                    "Redirected to Google login. Убедись что ты залогинен в YouTube в Chrome."
-                )
+                logger.warning("🔐 Redirected to login. Waiting 120s for you to log in manually...")
+                logger.warning("   ➜ Log into YouTube in the browser window that opened")
+                logger.warning("   ➜ After logging in, come back here and wait...")
+                try:
+                    page.wait_for_url("https://studio.youtube.com/**", timeout=120_000)
+                    logger.info("✅ Logged in!")
+                except Exception:
+                    raise RuntimeError(
+                        "Таймаут входа. Запусти скрипт снова и залогинься в окне браузера"
+                    )
 
             # Click Create
             logger.info("🔘 Clicking Create...")
@@ -140,40 +165,61 @@ def upload_to_youtube(video_path: str, title: str, description: str, visibility:
                         break
                 except Exception:
                     continue
-            page.wait_for_timeout(1500)
-
-            # Click Upload videos
-            logger.info("🔘 Clicking Upload videos...")
-            for selector in ["text=Upload videos", "text=Upload video", "text=Загрузить видео"]:
-                try:
-                    btn = page.locator(selector).first
-                    if btn.is_visible(timeout=1000):
-                        btn.click()
-                        break
-                except Exception:
-                    continue
             page.wait_for_timeout(1000)
 
-            # File picker
+            # Navigate directly to upload page (more reliable than dialogues)
+            logger.info("📤 Going to upload page...")
+            page.goto("https://www.youtube.com/upload", wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+
+            # File picker — intercept file chooser event
             logger.info(f"📁 Selecting file: {Path(video_path).name}")
             try:
-                file_input = page.locator('input[type="file"]').first
-                file_input.wait_for(timeout=10000)
-                file_input.set_input_files(video_path)
+                page.wait_for_timeout(1000)
+                with page.expect_file_chooser(timeout=15000) as fc_info:
+                    selectors = [
+                        "text=SELECT FILES",
+                        "text=Select Files",
+                        "text=Выбрать файл",
+                        "ytcp-button#select-files-button",
+                        "[data-testid='file-input']",
+                        "#select-files-button",
+                        "input[type='file']",
+                    ]
+                    clicked = False
+                    for sel in selectors:
+                        try:
+                            btn = page.locator(sel).first
+                            if btn.is_visible(timeout=1000):
+                                btn.click()
+                                clicked = True
+                                break
+                        except Exception:
+                            continue
+                    if not clicked:
+                        # Fallback: click anywhere in the upload area
+                        page.keyboard.press("Enter")
+                        page.wait_for_timeout(1000)
+                        page.keyboard.press("Enter")
+                file_chooser = fc_info.value
+                file_chooser.set_files(video_path)
+                logger.info("✅ File selected")
             except Exception as e:
-                raise RuntimeError(f"Could not set input file: {e}")
+                raise RuntimeError(f"Could not select file: {e}")
 
             # Wait for upload processing
             logger.info("⏳ Waiting for upload (may take time for large files)...")
             title_input = page.locator("#title-textarea, [aria-label*='Title']").first
             title_input.wait_for(timeout=600_000)
 
-            # Fill title
+            # Fill title (custom web component, use keyboard type)
             logger.info(f"📝 Title: {title}")
             title_input.click()
-            title_input.fill("")
-            page.wait_for_timeout(300)
-            title_input.fill(title[:100])
+            page.wait_for_timeout(500)
+            page.keyboard.press("Control+a")
+            page.keyboard.press("Delete")
+            page.keyboard.type(title[:100], delay=30)
+            page.wait_for_timeout(500)
 
             # Fill description
             logger.info("📝 Description...")
@@ -181,9 +227,11 @@ def upload_to_youtube(video_path: str, title: str, description: str, visibility:
                 desc_input = page.locator("#description-textarea, [aria-label*='Description']").first
                 desc_input.wait_for(timeout=5000)
                 desc_input.click()
-                desc_input.fill("")
                 page.wait_for_timeout(300)
-                desc_input.fill(description[:5000])
+                page.keyboard.press("Control+a")
+                page.keyboard.press("Delete")
+                page.keyboard.type(description[:5000], delay=15)
+                page.wait_for_timeout(300)
             except Exception as e:
                 logger.warning(f"Skipping description: {e}")
 
