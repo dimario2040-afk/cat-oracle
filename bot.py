@@ -1,4 +1,4 @@
-import logging, os, sys, io, random, tempfile, time, urllib.parse, urllib.request, asyncio
+import logging, os, sys, io, random, tempfile, urllib.parse, urllib.request, asyncio
 import asyncpg
 from aiohttp import web
 from pathlib import Path
@@ -650,8 +650,6 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
             try: await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
             except: pass
         logger.info(f"_send_totem_video: sent to user {user_id}")
-        # YouTube Shorts auto-upload (non-blocking, admin only)
-        asyncio.create_task(_auto_upload_to_youtube(mp4, cat, c.bot, user_id))
     except Exception as e:
         logger.error(f"_send_totem_video error: {e}")
         if prog_msg_id:
@@ -664,74 +662,6 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
             except:
                 try: await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
                 except: pass
-
-# ── YouTube Shorts auto-upload ──────────────────────────────────────
-
-async def _save_yt_cookies(cookies_json: str):
-    """Store YouTube cookies in DB (upsert row id=1)."""
-    pool = await get_pool()
-    async with pool.acquire() as c:
-        await c.execute("""
-            INSERT INTO yt_auth (id, cookies_json)
-            VALUES (1, $1)
-            ON CONFLICT (id) DO UPDATE SET cookies_json = EXCLUDED.cookies_json
-        """, cookies_json)
-
-async def _load_yt_cookies() -> str | None:
-    """Load YouTube cookies from DB. Returns JSON string or None."""
-    pool = await get_pool()
-    async with pool.acquire() as c:
-        row = await c.fetchrow("SELECT cookies_json FROM yt_auth WHERE id = 1")
-        return row["cookies_json"] if row else None
-
-async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict, bot=None, user_id: int = 0):
-    """Save mp4 and upload to YouTube Shorts if cookies exist.
-    Only uploads for ADMIN_ID. Sends result notification to admin."""
-    if user_id != ADMIN_ID:
-        return  # admin-only upload
-    cookies_json = await _load_yt_cookies()
-    if not cookies_json:
-        return  # no login → skip
-    try:
-        import json
-        videos_dir = Path("videos")
-        videos_dir.mkdir(exist_ok=True)
-        ts = int(time.time())
-        video_path = videos_dir / f"totem_{cat['id']}_{ts}.mp4"
-        video_path.write_bytes(mp4_bytes)
-
-        from youtube_uploader import YouTubeUploader
-        up = YouTubeUploader(cookies=json.loads(cookies_json), headless=True)
-        title = f"{cat['title']} – {cat['name']}"
-        desc = (
-            f"{cat['emoji']} {cat['name']}\n"
-            f"{cat['description']}\n\n"
-            f"Element: {cat['element']}\n"
-            f"#Shorts #Totem #CatWood"
-        )
-        ok = await up.upload_short(str(video_path), title, desc, visibility="unlisted")
-        if ok:
-            video_path.unlink(missing_ok=True)
-            logger.info(f"YouTube Shorts: uploaded {cat['name']}")
-            if bot:
-                try:
-                    await bot.send_message(ADMIN_ID, f"✅ YouTube Shorts: {cat['name']}")
-                except:
-                    pass
-        else:
-            if bot:
-                try:
-                    await bot.send_message(ADMIN_ID, f"❌ YouTube Shorts upload failed for {cat['name']}")
-                except:
-                    pass
-    except Exception as e:
-        logger.error(f"YouTube Shorts error: {e}")
-        if bot:
-            try:
-                await bot.send_message(ADMIN_ID, f"❌ YouTube Shorts error: {e}")
-            except:
-                pass
-
 
 async def _extract_ogg_from_video_note(mp4_bytes):
     """Extract audio from video note MP4 → returns OGG bytes (mono 16kHz)."""
@@ -830,12 +760,6 @@ async def init_db():
             await c.execute("ALTER TABLE user_limits ADD COLUMN IF NOT EXISTS lang TEXT DEFAULT 'ru'")
         except:
             pass
-        await c.execute("""
-            CREATE TABLE IF NOT EXISTS yt_auth(
-                id INTEGER PRIMARY KEY DEFAULT 1,
-                cookies_json TEXT NOT NULL
-            )
-        """)
         await c.execute("INSERT INTO stats(id,total,users,starts) VALUES(1,0,0,0) ON CONFLICT DO NOTHING")
 
 async def _get_lang(user_id):
@@ -1431,49 +1355,6 @@ async def give_oreshek(u,c):
         logger.error(f"give_oreshek fallback failed: {e}")
         await u.message.reply_text(_text("oreshek_fallback", lang), parse_mode="Markdown")
 
-# ── YouTube cookies command ─────────────────────────────────────────
-
-async def yt_cookies_file(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    """Handle cookies.json file from admin."""
-    if u.effective_user.id != ADMIN_ID:
-        return
-    doc = u.message.document
-    if not doc or not doc.file_name.endswith(".json"):
-        await u.message.reply_text("Send a .json file")
-        return
-    try:
-        f = await doc.get_file()
-        raw = await f.download_as_bytearray()
-        await _import_yt_cookies_json(raw.decode("utf-8"), u.message)
-    except Exception as e:
-        await u.message.reply_text(f"❌ File error: {e}")
-
-async def _import_yt_cookies_json(text: str, msg):
-    """Parse cookies JSON and save to DB. Called from cmd or file handler."""
-    try:
-        import json
-        parsed = json.loads(text)
-        if not isinstance(parsed, list):
-            raise ValueError("must be a JSON array")
-        await _save_yt_cookies(text)
-        await msg.reply_text(f"✅ YouTube cookies saved ({len(parsed)} шт)")
-        logger.info(f"YouTube cookies updated by admin ({len(parsed)} cookies)")
-    except Exception as e:
-        await msg.reply_text(f"❌ Bad JSON: {e}")
-
-async def yt_cookies(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    """Admin command: paste cookies JSON inline or send a .json file."""
-    if u.effective_user.id != ADMIN_ID:
-        await u.message.reply_text("Not allowed")
-        return
-    text = u.message.text
-    idx = text.find(" ")
-    if idx != -1 and text[idx+1:].strip():
-        await _import_yt_cookies_json(text[idx+1:].strip(), u.message)
-    else:
-        await u.message.reply_text("Отправь файл youtube_cookies.json как документ")
-
-
 # ── Main ───────────────────────────────────────────────────────────
 
 async def async_main():
@@ -1492,12 +1373,6 @@ async def async_main():
     app.add_handler(CommandHandler("give_oreshek",give_oreshek))
     app.add_handler(CommandHandler("lang", lang_cmd))
     app.add_handler(CommandHandler("language", lang_cmd))
-    app.add_handler(CommandHandler("ytcookies", yt_cookies))
-    # handle cookies.json file from admin
-    app.add_handler(MessageHandler(
-        filters.Document.FileExtension("json") & filters.User(user_id=ADMIN_ID),
-        yt_cookies_file
-    ))
     app.add_handler(MessageHandler(filters.VOICE,handle_voice))
     app.add_handler(MessageHandler(filters.VIDEO_NOTE,handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
