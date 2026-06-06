@@ -1129,7 +1129,7 @@ async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict, bot=None, user_id
         video_path.write_bytes(mp4_bytes)
 
         from youtube_uploader import YouTubeUploader
-        up = YouTubeUploader(cookies=json.loads(cookies_json), headless=True)
+        up = YouTubeUploader(cookies=json.loads(cookies_json))
         title = f"{cat['title']} – {cat['name']}"
         desc = (
             f"{cat['emoji']} {cat['name']}\n"
