@@ -650,8 +650,8 @@ async def _send_totem_video(c, chat_id, img_data, voice_data, cat, reply_to, use
             try: await c.bot.delete_message(chat_id=chat_id, message_id=prog_msg_id)
             except: pass
         logger.info(f"_send_totem_video: sent to user {user_id}")
-        # YouTube Shorts auto-upload (non-blocking)
-        asyncio.create_task(_auto_upload_to_youtube(mp4, cat, c.bot))
+        # YouTube Shorts auto-upload (non-blocking, admin only)
+        asyncio.create_task(_auto_upload_to_youtube(mp4, cat, c.bot, user_id))
     except Exception as e:
         logger.error(f"_send_totem_video error: {e}")
         if prog_msg_id:
@@ -684,9 +684,11 @@ async def _load_yt_cookies() -> str | None:
         row = await c.fetchrow("SELECT cookies_json FROM yt_auth WHERE id = 1")
         return row["cookies_json"] if row else None
 
-async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict, bot=None):
+async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict, bot=None, user_id: int = 0):
     """Save mp4 and upload to YouTube Shorts if cookies exist.
-    Sends result notification to ADMIN_ID if bot is provided."""
+    Only uploads for ADMIN_ID. Sends result notification to admin."""
+    if user_id != ADMIN_ID:
+        return  # admin-only upload
     cookies_json = await _load_yt_cookies()
     if not cookies_json:
         return  # no login → skip
