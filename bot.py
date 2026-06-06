@@ -700,8 +700,7 @@ async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict, bot=None, user_id
         video_path = videos_dir / f"totem_{cat['id']}_{ts}.mp4"
         video_path.write_bytes(mp4_bytes)
 
-        from youtube_uploader import YouTubeUploader
-        up = YouTubeUploader(cookies=json.loads(cookies_json), headless=True)
+        from youtube_api import upload_short as yt_upload
         title = f"{cat['title']} – {cat['name']}"
         desc = (
             f"{cat['emoji']} {cat['name']}\n"
@@ -709,7 +708,7 @@ async def _auto_upload_to_youtube(mp4_bytes: bytes, cat: dict, bot=None, user_id
             f"Element: {cat['element']}\n"
             f"#Shorts #Totem #CatWood"
         )
-        ok = await up.upload_short(str(video_path), title, desc, visibility="unlisted")
+        ok = await yt_upload(str(video_path), title, desc, cookies=json.loads(cookies_json), visibility="unlisted")
         if ok:
             video_path.unlink(missing_ok=True)
             logger.info(f"YouTube Shorts: uploaded {cat['name']}")
