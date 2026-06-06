@@ -17,6 +17,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8827616686:AAFwdGgz5dkKEe_VbXvfHHecZk3S
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
 BOT_USERNAME = "catwood_bot"
 UPLOAD_CHANNEL_ID = os.environ.get("UPLOAD_CHANNEL_ID", "")
+YT_VISIBILITY = os.environ.get("YT_VISIBILITY", "public")
 
 # YouTube upload queue (callback data → video bytes + cat metadata)
 _yt_queue: dict[str, dict] = {}
@@ -1137,7 +1138,7 @@ async def yt_queue_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
         f"#youtube_upload\n"
         f"TITLE: {cat['title']} – {cat['name']}\n"
         f"DESC: {cat['emoji']} {cat['name']} – {cat['description']} | Element: {cat['element']}\n"
-        f"VISIBILITY: unlisted | USER: {data['user_id']}"
+        f"VISIBILITY: {YT_VISIBILITY} | USER: {data['user_id']}"
     )
     try:
         await c.bot.send_video(
