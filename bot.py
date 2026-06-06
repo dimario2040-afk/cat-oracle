@@ -1225,22 +1225,33 @@ async def yt_cookies(u, c):
 
 async def yt_cookies_file(u, c):
     """Admin: handle uploaded cookies.json file."""
-    user_id = u.effective_user.id
-    if user_id != ADMIN_ID:
-        return
-    doc = u.message.document
-    if not doc or not doc.file_name.endswith(".json"):
-        return
-    raw = await (await doc.get_file()).download_as_bytearray()
     try:
-        cookies = json.loads(raw.decode("utf-8"))
-        if not isinstance(cookies, list):
-            raise ValueError("Not a list")
+        user_id = u.effective_user.id
+        if user_id != ADMIN_ID:
+            return
+        doc = u.message.document
+        if not doc:
+            return
+        fname = (doc.file_name or "").lower()
+        if not (fname.endswith(".json") or fname.endswith(".txt")):
+            return
+        raw = await (await doc.get_file()).download_as_bytearray()
+        try:
+            cookies = json.loads(raw.decode("utf-8"))
+            if not isinstance(cookies, list):
+                raise ValueError("Not a list")
+        except Exception as e:
+            await u.message.reply_text(f"❌ Invalid JSON file: {e}")
+            return
+        await _save_yt_cookies(json.dumps(cookies))
+        await u.message.reply_text(f"✅ YouTube cookies saved from file ({len(cookies)} cookies)")
     except Exception as e:
-        await u.message.reply_text(f"❌ Invalid JSON file: {e}")
-        return
-    await _save_yt_cookies(json.dumps(cookies))
-    await u.message.reply_text(f"✅ YouTube cookies saved from file ({len(cookies)} cookies)")
+        import traceback
+        logger.error(f"yt_cookies_file crashed: {e}\n{traceback.format_exc()}")
+        try:
+            await u.message.reply_text(f"❌ Error: {e}")
+        except:
+            pass
 
 async def buy_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
     query = u.callback_query
