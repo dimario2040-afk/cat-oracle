@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -46,6 +47,27 @@ USER_AGENT = (
 
 # ── uploader ─────────────────────────────────────────────────────────
 
+def _ensure_browsers():
+    """Install Playwright browsers at runtime if missing."""
+    cache = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "~/.cache/ms-playwright")).expanduser()
+    found = list(cache.glob("chromium-*"))
+    if found:
+        logger.info(f"Playwright browsers found: {found[0].name}")
+        return
+    logger.info("Playwright browsers not found — installing...")
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            check=True, timeout=300, capture_output=True,
+        )
+        logger.info("Playwright browsers installed")
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode() if e.stderr else ""
+        logger.error(f"playwright install failed: {stderr[:200]}")
+    except subprocess.TimeoutExpired:
+        logger.error("playwright install timed out after 300s")
+
+
 class YouTubeUploader:
     """Upload Shorts to YouTube via automated YouTube Studio workflow.
 
@@ -69,6 +91,7 @@ class YouTubeUploader:
     # ── context factory ──────────────────────────────────────────────
 
     async def _browser(self):
+        _ensure_browsers()
         pw = await async_playwright().start()
         browser = await pw.chromium.launch(headless=self.headless, args=LAUNCH_ARGS)
         ctx = await browser.new_context(
@@ -144,6 +167,9 @@ class YouTubeUploader:
         desc = description.strip()
         if "#Shorts" not in desc and "#shorts" not in desc:
             desc += "\n\n#Shorts"
+
+        # Ensure browsers are installed (install at runtime if missing)
+        _install_browsers()
 
         pw = await async_playwright().start()
         # full Chromium + --headless=new → avoids chromium_headless_shell
