@@ -46,3 +46,5 @@ youtube_cookies_fresh.json
 # project
 english_bot/bot_en.py
 .omo/
+
+youtube_state.json

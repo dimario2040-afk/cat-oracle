@@ -72,35 +72,90 @@ def ensure_logged_in(context, page) -> bool:
             raise RuntimeError("Manual login timeout. Set YT_EMAIL + YT_PASSWORD and retry.")
 
     logger.info("🔐 Auto-login with credentials...")
+    current_url = page.url
+    logger.info(f"  Page URL: {current_url}")
+
     try:
-        # Email
+        # Step 1: Handle account chooser page
+        if "accountchooser" in page.url:
+            logger.info("  Account chooser page detected")
+            # Click the account with our email
+            account_btn = page.locator(f"text={YT_EMAIL}").first
+            if account_btn.is_visible(timeout=5000):
+                account_btn.click()
+                logger.info("  Clicked saved account")
+                page.wait_for_timeout(5000)
+            else:
+                # Click "Use another account"
+                for alt_text in ["Use another account", "Другой аккаунт", "add account", "add email"]:
+                    try:
+                        alt_btn = page.locator(f"text={alt_text}").first
+                        if alt_btn.is_visible(timeout=2000):
+                            alt_btn.click()
+                            logger.info(f"  Clicked: {alt_text}")
+                            page.wait_for_timeout(3000)
+                            break
+                    except:
+                        continue
+
+        # Step 2: Email field
         email_input = page.locator("#identifierId").first
-        email_input.wait_for(timeout=10000)
-        email_input.click()
-        email_input.fill(YT_EMAIL)
-        page.wait_for_timeout(500)
-        page.keyboard.press("Enter")
-        page.wait_for_timeout(3000)
+        if email_input.is_visible(timeout=5000):
+            email_input.click()
+            email_input.fill(YT_EMAIL)
+            page.wait_for_timeout(500)
+            page.keyboard.press("Enter")
+            logger.info("  Email entered")
+            page.wait_for_timeout(3000)
 
-        # Password
-        pwd_input = page.locator("#password input, [name='Passwd'], #password").first
-        pwd_input.wait_for(timeout=15000)
-        pwd_input.click()
-        pwd_input.fill(YT_PASSWORD)
-        page.wait_for_timeout(500)
-        page.keyboard.press("Enter")
+        # Step 3: Password field (if needed - might be signed in already)
+        if "studio.youtube.com" not in page.url:
+            pwd_input = None
+            # Try various selectors for the password field
+            for sel in ["#password input[type='password']", "input[name='Passwd']", "input[type='password']"]:
+                try:
+                    candidate = page.locator(sel).first
+                    if candidate.is_visible(timeout=3000):
+                        pwd_input = candidate
+                        logger.info(f"  Password field found via: {sel}")
+                        break
+                except:
+                    continue
 
-        # Wait for redirect to studio
-        page.wait_for_url("https://studio.youtube.com/**", timeout=30000)
-        logger.info("✅ Auto-login successful!")
+            if pwd_input:
+                pwd_input.click()
+                page.wait_for_timeout(300)
+                pwd_input.fill(YT_PASSWORD)
+                page.wait_for_timeout(500)
+                page.keyboard.press("Enter")
+                logger.info("  Password entered")
+                page.wait_for_timeout(3000)
 
-        # Save storage state for future runs
+        # Step 4: Wait for YouTube Studio
+        try:
+            page.wait_for_url("https://studio.youtube.com/**", timeout=30000)
+            logger.info("✅ Auto-login successful!")
+        except Exception:
+            # Maybe we're on youtube.com directly
+            if "youtube.com" in page.url:
+                page.goto("https://studio.youtube.com", wait_until="domcontentloaded", timeout=15000)
+                page.wait_for_timeout(3000)
+            else:
+                raise RuntimeError(f"Login failed. Current URL: {page.url}")
+
+        # Save state
         state_path = str(STATE_FILE.resolve())
         context.storage_state(path=state_path)
         logger.info(f"💾 Saved session state to {state_path}")
         return True
+
     except Exception as e:
-        raise RuntimeError(f"Auto-login failed: {e}. Check YT_EMAIL / YT_PASSWORD.")
+        try:
+            page.screenshot(path="login_error.png")
+        except:
+            pass
+        raise RuntimeError(f"Auto-login failed: {e}")
+
 
 
 def upload_video(context, page, video_path: str, title: str, description: str, visibility: str):
@@ -113,35 +168,33 @@ def upload_video(context, page, video_path: str, title: str, description: str, v
 
     # Navigate directly to upload page
     page.goto("https://www.youtube.com/upload", wait_until="domcontentloaded", timeout=30000)
-    page.wait_for_timeout(3000)
+    page.wait_for_timeout(5000)
 
-    # File picker
+    # File picker — find the hidden file input and set file directly
     logger.info(f"📁 Selecting file: {Path(video_path).name}")
     try:
-        page.wait_for_timeout(1000)
-        with page.expect_file_chooser(timeout=15000) as fc_info:
-            selectors = [
-                "text=SELECT FILES", "text=Select Files", "text=Выбрать файл",
-                "ytcp-button#select-files-button", "[data-testid='file-input']",
-                "#select-files-button", "input[type='file']",
-            ]
-            clicked = False
-            for sel in selectors:
-                try:
-                    btn = page.locator(sel).first
-                    if btn.is_visible(timeout=1000):
-                        btn.click()
-                        clicked = True
-                        break
-                except Exception:
-                    continue
-            if not clicked:
-                page.keyboard.press("Enter")
-                page.wait_for_timeout(1000)
-                page.keyboard.press("Enter")
-        file_chooser = fc_info.value
-        file_chooser.set_files(video_path)
-        logger.info("✅ File selected")
+        # Try direct file input first (most reliable)
+        file_input = page.locator("input[type='file']").first
+        if file_input.count() > 0:
+            file_input.set_input_files(video_path)
+            logger.info("✅ File set via input[type=file]")
+        else:
+            # Fallback: click any upload button to trigger file chooser
+            with page.expect_file_chooser(timeout=15000) as fc_info:
+                for sel in [
+                    "text=SELECT FILES", "text=Select Files", "text=Выбрать файл",
+                    "ytcp-button#select-files-button", "#select-files-button",
+                ]:
+                    try:
+                        btn = page.locator(sel).first
+                        if btn.count() > 0:
+                            btn.click()
+                            break
+                    except:
+                        continue
+            file_chooser = fc_info.value
+            file_chooser.set_files(video_path)
+            logger.info("✅ File selected via file chooser")
     except Exception as e:
         raise RuntimeError(f"Could not select file: {e}")
 
@@ -387,10 +440,14 @@ def main_loop():
             browser.close()
             return
 
-        # Main loop
+        # Main loop (one-shot if --once flag)
+        once = "--once" in sys.argv
         while True:
             try:
                 processed = process_queue(context, page)
+                if once:
+                    logger.info("✅ One-shot complete. Exiting.")
+                    break
                 if processed:
                     logger.info("✅ Queue processed. Sleeping 2 hours...")
                 else:
@@ -399,9 +456,12 @@ def main_loop():
                 raise
             except Exception as e:
                 logger.error(f"Loop error: {e}")
+                if once:
+                    break
                 logger.info("💤 Sleeping 2 hours before retry...")
 
-            time.sleep(RUN_SCHEDULE)
+            if not once:
+                time.sleep(RUN_SCHEDULE)
 
 
 # ── Entry ────────────────────────────────────────────────────────────
