@@ -13,7 +13,7 @@ from telegram.request import HTTPXRequest
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8827616686:AAFwdGgz5dkKEe_VbXvfHHecZk3Se0oOPek")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8923194233:AAH4bhTZItjtrwzQ2r8sAE_3PDN5G5xBS0Y")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
 BOT_USERNAME = "catwood_bot"
 UPLOAD_CHANNEL_ID = os.environ.get("UPLOAD_CHANNEL_ID", "")
