@@ -1483,7 +1483,15 @@ async def async_main():
             return web.Response(status=200)
 
     async def health_handle(_request):
-        return web.Response(text="Bot is alive (bilingual v2)")
+        # Touch the DB so Supabase sees activity (cron pings every 5 min)
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as c:
+                await c.fetchval("SELECT 1")
+            return web.Response(text="Bot is alive (bilingual v2) [db:ok]")
+        except Exception as e:
+            logger.warning(f"health db check failed: {e}")
+            return web.Response(text="Bot is alive (bilingual v2) [db:down]", status=503)
 
     web_app = web.Application()
     web_app.router.add_post(f"/{SECRET}", webhook_handle)
