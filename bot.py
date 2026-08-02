@@ -1563,9 +1563,11 @@ async def premium(u,c):
         [InlineKeyboardButton(_text("btn_donate", lang), callback_data="donate")],
     ])
     # Mini-game button: opens WebApp — win grants +1 reading (daily-limited)
+    rows = list(keyboard.inline_keyboard)
     try:
         play_url = _match3_url()
-        keyboard.inline_keyboard.append([InlineKeyboardButton(_text("btn_play", lang), web_app=WebAppInfo(url=play_url))])
+        rows = rows + [[InlineKeyboardButton(_text("btn_play", lang), web_app=WebAppInfo(url=play_url))]]
+        keyboard = InlineKeyboardMarkup(rows)
     except Exception as e:
         logger.warning(f"play button build failed: {e}")
     await u.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
