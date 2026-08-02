@@ -4,9 +4,10 @@ from aiohttp import web
 from pathlib import Path
 from datetime import datetime, timedelta
 import numpy as np
+from match3_game import GAME_HTML
 import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto, InlineQueryResultCachedVoice, InlineQueryResultArticle, InputTextMessageContent, LabeledPrice
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto, InlineQueryResultCachedVoice, InlineQueryResultArticle, InputTextMessageContent, LabeledPrice, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, CallbackQueryHandler, PreCheckoutQueryHandler, BaseHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
@@ -311,6 +312,19 @@ _T = {
     "btn_buy_compat": {"ru": "💞 Совместимость (20 ⭐)", "en": "💞 Compatibility (20 ⭐)"},
     "btn_buy_sub": {"ru": "📅 Подписка (200 ⭐/мес)", "en": "📅 Subscription (200 ⭐/mo)"},
     "btn_donate": {"ru": "💝 Поддержать донатом", "en": "💝 Support with a donation"},
+    "btn_play": {"ru": "🎯 Сыграть (+1 гадание)", "en": "🎯 Play (+1 reading)"},
+
+    # play (mini-game)
+    "play_cmd": {"ru": "🎯 *Мини-игра «Три в ряд»*\n\nСобери 3+ фишки в ряд — выиграй *+1 гадание* в боте!\nОдин выигрыш в день бесплатно. Жми кнопку 👇",
+                 "en": "🎯 *Match-3 mini-game*\n\nMatch 3+ tiles — win *+1 reading* in the bot!\nOne win per day free. Tap the button 👇"},
+    "play_won": {"ru": "🎉 *Победа!* +1 гадание зачислено тебе в бонус.",
+                 "en": "🎉 *Victory!* +1 reading credited to your bonus."},
+    "play_lost": {"ru": "😿 Не набрал нужных очков. Попробуй ещё раз — без выигрыша.",
+                  "en": "😿 Not enough points. Try again — no win this time."},
+    "play_already_won": {"ru": "🕒 Ты уже выиграл гадание сегодня. Возвращайся завтра!",
+                         "en": "🕒 You've already won a reading today. Come back tomorrow!"},
+    "play_invalid": {"ru": "⚠️ Неверные данные из игры.",
+                     "en": "⚠️ Invalid game data."},
 
     # buy
     "buy_unknown": {"ru": "❌ Неизвестный товар", "en": "❌ Unknown item"},
@@ -1475,6 +1489,55 @@ async def yt_queue_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+def _match3_url():
+    """URL of the match-3 WebApp served by this bot's HTTP server."""
+    base = os.environ.get("RENDER_EXTERNAL_URL", "https://cat-oracle-v2.onrender.com").rstrip("/")
+    return f"{base}/match3"
+
+async def play(u, c):
+    """Open the Match-3 mini-game WebApp. Victory → +1 bonus reading (daily-limited)."""
+    lang = await _get_user_lang(u)
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton(_text("btn_play", lang), web_app=WebAppInfo(url=_match3_url()))
+    ]])
+    await u.message.reply_text(_text("play_cmd", lang), parse_mode="Markdown", reply_markup=kb)
+
+async def match3_handler(_request):
+    """Serve the Match-3 WebApp HTML."""
+    return web.Response(text=GAME_HTML, content_type="text/html", charset="utf-8")
+
+async def play_data_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    """Receive WebApp data — win event from the Match-3 game."""
+    user_id = u.effective_user.id
+    lang = await _get_user_lang(u)
+    raw = u.message.web_app_data.data if u.message and u.message.web_app_data else None
+    try:
+        data = json.loads(raw) if raw else {}
+    except Exception:
+        data = {}
+    if data.get("event") != "win":
+        return await c.bot.send_message(chat_id=user_id, text=_text("play_invalid", lang), parse_mode="Markdown")
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Ensure the mini_game_wins table exists
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mini_game_wins(
+                user_id BIGINT PRIMARY KEY, last_win_date TEXT
+            )
+        """)
+        last = await conn.fetchval("SELECT last_win_date FROM mini_game_wins WHERE user_id=$1", user_id)
+        if last == today:
+            return await c.bot.send_message(chat_id=user_id, text=_text("play_already_won", lang), parse_mode="Markdown")
+        # Grant +1 reading and record the day
+        await _add_bonus(user_id, 1)
+        await conn.execute("""
+            INSERT INTO mini_game_wins(user_id, last_win_date) VALUES($1, $2)
+            ON CONFLICT (user_id) DO UPDATE SET last_win_date=$2
+        """, user_id, today)
+    logger.info(f"Match-3 win: user={user_id} score={data.get('score')} -> +1 reading")
+    await c.bot.send_message(chat_id=user_id, text=_text("play_won", lang), parse_mode="Markdown")
+
 async def premium(u,c):
     user_id = u.effective_user.id
     lang = await _get_user_lang(u)
@@ -1499,6 +1562,12 @@ async def premium(u,c):
         [InlineKeyboardButton(_text("btn_buy_sub", lang), callback_data="buy_sub")],
         [InlineKeyboardButton(_text("btn_donate", lang), callback_data="donate")],
     ])
+    # Mini-game button: opens WebApp — win grants +1 reading (daily-limited)
+    try:
+        play_url = _match3_url()
+        keyboard.inline_keyboard.append([InlineKeyboardButton(_text("btn_play", lang), web_app=WebAppInfo(url=play_url))])
+    except Exception as e:
+        logger.warning(f"play button build failed: {e}")
     await u.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
 
 async def buy_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
@@ -1824,6 +1893,7 @@ async def async_main():
     app.add_handler(CommandHandler("stats",stats))
     app.add_handler(CommandHandler("about",about))
     app.add_handler(CommandHandler("premium",premium))
+    app.add_handler(CommandHandler("play", play))
     app.add_handler(CommandHandler("donate",donate))
     app.add_handler(CommandHandler("give_oreshek",give_oreshek))
     app.add_handler(CommandHandler("lang", lang_cmd))
@@ -1840,6 +1910,7 @@ async def async_main():
     app.add_handler(PreCheckoutQueryHandler(pre_checkout_handler))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
     app.add_handler(RecurringPaymentTypeHandler(recurring_payment_handler))
+    app.add_handler(MessageHandler(filters.WEB_APP_DATA, play_data_handler))
     app.add_handler(InlineQueryHandler(inline_query))
     await app.initialize()
     await app.start()
@@ -1882,6 +1953,7 @@ async def async_main():
     web_app = web.Application()
     web_app.router.add_post(f"/{SECRET}", webhook_handle)
     web_app.router.add_get("/", health_handle)
+    web_app.router.add_get("/match3", match3_handler)
     runner = web.AppRunner(web_app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
