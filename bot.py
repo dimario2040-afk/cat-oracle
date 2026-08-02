@@ -1,4 +1,4 @@
-import logging, os, sys, io, random, tempfile, urllib.parse, urllib.request, asyncio, json, uuid, time
+import logging, os, sys, io, random, tempfile, urllib.parse, urllib.request, asyncio, json, uuid, time, math
 import asyncpg
 from aiohttp import web
 from pathlib import Path
@@ -7,7 +7,7 @@ import numpy as np
 import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultCachedPhoto, InlineQueryResultCachedVoice, InlineQueryResultArticle, InputTextMessageContent, LabeledPrice
-from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, CallbackQueryHandler, PreCheckoutQueryHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, InlineQueryHandler, CallbackQueryHandler, PreCheckoutQueryHandler, BaseHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -188,6 +188,35 @@ _share_data = {}
 _last_analysis = {}
 _pending_action = {}
 
+# ── Monetization offers (Telegram Stars) ───────────────────────────
+PRICE_DAYPASS = 20      # unlimited for 24h
+PRICE_LEGENDARY = 20    # legendary totem from next voice
+PRICE_POSTER = 40       # HD poster + voice portrait
+PRICE_COMPAT = 20       # two-voice compatibility (viral)
+PRICE_SUB = 200         # monthly subscription (auto-renew)
+DONATE_OPTIONS = (5, 10, 25)
+SUB_PERIOD_SECONDS = 2592000  # 30 days
+SUB_PARAM_PREFIX = "catwood_sub"
+
+# Compatibility sessions: token -> {a_id, a_lang, a_cat, a_name, ts}
+_compat_sessions = {}
+# user_id -> token (friend waiting to record their voice)
+_compat_pending = {}
+# referee_id -> referrer_id (bonus granted only after a real voice message)
+_pending_ref = {}
+_COMPAT_TTL = 24 * 3600
+
+OFFER_LABELS = {
+    "buy_daypass": "Day Pass",
+    "buy_poster": "HD-постер",
+    "buy_legendary": "Легендарный",
+    "buy_compat": "Совместимость",
+    "buy_sub": "Подписка",
+    "donate": "Донат",
+    "buy_unlimited": "Безлимит (старый)",
+    "buy_reroll": "Переброс (старый)",
+}
+
 # ── i18n strings ───────────────────────────────────────────────────
 
 _T = {
@@ -216,9 +245,9 @@ _T = {
     "error_short": {"ru": "🌫 *Туман...* Попробуй ещё раз! 🐱", "en": "🌫 *Fog...* Try again! 🐱"},
 
     # limits
-    "limit_reached": {"ru": "🌫 *Лимит исчерпан* 🌫\n\nТы сегодня уже получил 3 тотема. Дух Леса устал.\n\n✨ Открой безлимитный доступ всего за *1 Star*!",
-                      "en": "🌫 *Daily limit reached* 🌫\n\nYou've already received 3 totems today. The Forest Spirit is exhausted.\n\n✨ Unlock unlimited access for just *1 Star*!"},
-    "btn_unlimited": {"ru": "⭐ Безлимит (1 Star)", "en": "⭐ Unlimited (1 Star)"},
+    "limit_reached": {"ru": "🌫 *Лимит исчерпан* 🌫\n\nТы сегодня уже получил 3 тотема. Дух Леса устал.\n\n✨ Открой *Day Pass* — безлимит на 24 часа за *20 Stars*!",
+                      "en": "🌫 *Daily limit reached* 🌫\n\nYou've already received 3 totems today. The Forest Spirit is exhausted.\n\n✨ Unlock a *Day Pass* — unlimited for 24 hours for just *20 Stars*!"},
+    "btn_daypass": {"ru": "⭐ Day Pass (20 ⭐)", "en": "⭐ Day Pass (20 ⭐)"},
 
     # start
     "ref_notify": {"ru": "🎉 *{{name}}* перешёл по твоей ссылке!\nТы получил +1 гадание 🐱",
@@ -271,44 +300,86 @@ _T = {
                   "en": "🐱 *Cat Fortune Cookie — How it works* 🐱\n\n1️⃣ Send a voice message\n2️⃣ Meow purr hiss howl scream\n3️⃣ Get your cat totem!\n4️⃣ Share with friends\n\n✨ *Every voice is unique — every totem is sacred* ✨\n\nCommands: /start /help /stats /about /premium\n💬 /lang — switch between русский/english"},
 
     # premium
-    "premium_unlimited": {"ru": "🌟 *У тебя уже есть Безлимитный доступ!* 🌟\n\nСпасибо за поддержку Зачарованного Леса!\n\n👥 *Приведи друга:* ниже твоя ссылка\n{{ref}}\n\n📦 Накоплено бонусных гаданий: *{{bonus}}*\nПриведи друга → получи +1 гадание!\n\n👑 Хочешь Легендарного кота? /premium\n🔄 Или переброс тотема через /premium",
-                          "en": "🌟 *You already have Unlimited Access!* 🌟\n\nThanks for supporting the Enchanted Woods!\n\n👥 *Bring a friend:* your referral link below\n{{ref}}\n\n📦 Bonus readings stored: *{{bonus}}*\nBring a friend → get +1 reading!\n\n👑 Want a Legendary cat? /premium\n🔄 Or re-roll your totem via /premium"},
-    "premium_regular": {"ru": "🌟 *Зачарованный Лес — Премиум* 🌟\n\n🐱 Бесплатных гаданий сегодня: *{{remaining}}*\n📦 Бонусных (за рефералов): *{{bonus}}*\n\n👥 *Приведи друга — получи +1 гадание:*\n{{ref}}\n\n🎭 Открой все тайны Леса с Telegram Stars!\n\n⭐ *1 Star* — Безлимит на 30 дней ✨\n   Сними дневной лимит!\n\n⭐ *2 Stars* — Переброс тотема 🔄\n   Получи нового кота из своего голоса\n\n⭐ *3 Stars* — Легендарный кот 👑\n   Эксклюзивный тотем из высшей касты!\n\n🌲 *Дух Леса благодарит тебя за поддержку!*",
-                        "en": "🌟 *Enchanted Woods — Premium* 🌟\n\n🐱 Free readings today: *{{remaining}}*\n📦 Bonus (referrals): *{{bonus}}*\n\n👥 *Bring a friend — get +1 reading:*\n{{ref}}\n\n🎭 Unlock all the Woods secrets with Telegram Stars!\n\n⭐ *1 Star* — Unlimited for 30 days ✨\n   Remove the daily limit!\n\n⭐ *2 Stars* — Re-roll totem 🔄\n   Get a new cat from your voice\n\n⭐ *3 Stars* — Legendary cat 👑\n   Exclusive totem from the highest caste!\n\n🌲 *The Forest Spirit thanks you for your support!*"},
-    "btn_buy_unlimited": {"ru": "⭐ Безлимит (1 Star)", "en": "⭐ Unlimited (1 Star)"},
-    "btn_buy_reroll": {"ru": "🔄 Переброс (2 Stars)", "en": "🔄 Re-roll (2 Stars)"},
-    "btn_buy_legendary": {"ru": "👑 Легендарный (3 Stars)", "en": "👑 Legendary (3 Stars)"},
+    "premium_unlimited": {"ru": "🌟 *У тебя уже есть безлимит!* 🌟\nДействует до *{{until}}*.\n\nНо это ещё не всё:\n",
+                          "en": "🌟 *You already have unlimited access!* 🌟\nActive until *{{until}}*.\n\nBut that's not all:\n"},
+    "premium_regular": {"ru": "🌟 *Зачарованный Лес — Премиум* 🌟\n\n🐱 Бесплатных гаданий сегодня: *{{remaining}}*\n📦 Бонусных (за рефералов): *{{bonus}}*\n\n👥 *Приведи друга — получи +1 гадание:*\n{{ref}}\n\n🎭 Открой все тайны Леса с Telegram Stars:\n\n⭐ *20* — Day Pass: безлимит на 24 часа ✨\n⭐ *20* — Легендарный кот 👑\n⭐ *40* — HD-постер: портрет твоего голоса 🖼\n⭐ *20* — Совместимость: совместимы ли вы 💞\n⭐ *200* — Подписка: безлимит на месяц 📅\n\n🌲 *Дух Леса благодарит тебя за поддержку!*",
+                        "en": "🌟 *Enchanted Woods — Premium* 🌟\n\n🐱 Free readings today: *{{remaining}}*\n📦 Bonus (referrals): *{{bonus}}*\n\n👥 *Bring a friend — get +1 reading:*\n{{ref}}\n\n🎭 Unlock the Woods' secrets with Telegram Stars:\n\n⭐ *20* — Day Pass: unlimited for 24h ✨\n⭐ *20* — Legendary cat 👑\n⭐ *40* — HD poster: your voice portrait 🖼\n⭐ *20* — Compatibility: are you a match? 💞\n⭐ *200* — Subscription: 1 month unlimited 📅\n\n🌲 *The Forest Spirit thanks you for your support!*"},
+    "btn_buy_daypass": {"ru": "⭐ Day Pass (20 ⭐)", "en": "⭐ Day Pass (20 ⭐)"},
+    "btn_buy_legendary": {"ru": "👑 Легендарный кот (20 ⭐)", "en": "👑 Legendary cat (20 ⭐)"},
+    "btn_buy_poster": {"ru": "🖼 HD-постер (40 ⭐)", "en": "🖼 HD poster (40 ⭐)"},
+    "btn_buy_compat": {"ru": "💞 Совместимость (20 ⭐)", "en": "💞 Compatibility (20 ⭐)"},
+    "btn_buy_sub": {"ru": "📅 Подписка (200 ⭐/мес)", "en": "📅 Subscription (200 ⭐/mo)"},
     "btn_donate": {"ru": "💝 Поддержать донатом", "en": "💝 Support with a donation"},
 
     # buy
     "buy_unknown": {"ru": "❌ Неизвестный товар", "en": "❌ Unknown item"},
     "buy_need_totem": {"ru": "❌ Сначала получи тотем! Отправь голосовое сообщение.", "en": "❌ Get a totem first! Send a voice message."},
     "buy_invoice_desc": {"ru": "Поддержка Зачарованного Леса ({{stars}} ⭐)", "en": "Support the Enchanted Woods ({{stars}} ⭐)"},
-    "buy_unlimited_title": {"ru": "⭐ Безлимит на 30 дней", "en": "⭐ Unlimited for 30 days"},
-    "buy_reroll_title": {"ru": "🔄 Переброс тотема", "en": "🔄 Re-roll totem"},
+    "buy_error": {"ru": "❌ Не удалось создать счёт. Попробуй ещё раз.", "en": "❌ Couldn't create the invoice. Try again."},
+    "buy_daypass_title": {"ru": "⭐ Day Pass — безлимит на 24 часа", "en": "⭐ Day Pass — unlimited for 24 hours"},
     "buy_legendary_title": {"ru": "👑 Легендарный кот", "en": "👑 Legendary cat"},
+    "buy_poster_title": {"ru": "🖼 HD-постер: портрет голоса", "en": "🖼 HD poster: voice portrait"},
+    "buy_compat_title": {"ru": "💞 Совместимость котов", "en": "💞 Cat compatibility"},
+    "buy_sub_title": {"ru": "📅 Подписка — безлимит на месяц", "en": "📅 Subscription — 1 month unlimited"},
+    "buy_sub_desc": {"ru": "Безлимит на 30 дней + авто-продление (200 ⭐/мес)", "en": "30 days unlimited + auto-renewal (200 ⭐/mo)"},
 
     # payment success
-    "pay_unlimited": {"ru": "🌟 *Безлимитный доступ активирован на 30 дней!* 🌟\n\nДух Леса благодарит тебя! Теперь никаких ограничений.\n\nОтправляй голосовые сколько хочешь! 🐾",
-                      "en": "🌟 *Unlimited access activated for 30 days!* 🌟\n\nThe Forest Spirit thanks you! No more limits.\n\nSend as many voice messages as you want! 🐾"},
-    "pay_reroll_caption": {"ru": "🔄 *Переброс!* 🔄\n\n{{emoji}} {{title}}\n{{desc}}\n\n🌀 Стихия: {{element}}",
-                           "en": "🔄 *Re-roll!* 🔄\n\n{{emoji}} {{title}}\n{{desc}}\n\n🌀 Element: {{element}}"},
-    "pay_reroll_done": {"ru": "🐾 *Твой новый тотем!* Поделись с друзьями!", "en": "🐾 *Your new totem!* Share with friends!"},
-    "pay_reroll_fail": {"ru": "❌ Нет данных о голосе. Отправь голосовое и повтори попытку.", "en": "❌ No voice data found. Send a voice message and try again."},
+    "pay_daypass": {"ru": "🌟 *Day Pass активирован!* 🌟\n\nБезлимит на 24 часа. Экспериментируй с голосом: шёпот, крик, песня — сколько угодно! 🐾",
+                    "en": "🌟 *Day Pass activated!* 🌟\n\nUnlimited for 24 hours. Experiment with your voice: whisper, scream, sing — as much as you want! 🐾"},
+    "pay_poster": {"ru": "🖼 *HD-постер активирован!* 🖼\n\n🎤 Отправь голосовое — Дух Леса создаст твой *HD-портрет* и раскроет тайны твоего голоса!",
+                   "en": "🖼 *HD poster activated!* 🖼\n\n🎤 Send a voice message — the Forest Spirit will craft your *HD portrait* and reveal the secrets of your voice!"},
     "pay_legendary": {"ru": "👑 *Легендарный кот активирован!* 👑\n\n🎤 Отправь голосовое сообщение, и Дух Леса\nвыберет тебе *Легендарного кота* из высшей касты!\n\n🐱 *Мяу-у-у...*",
                       "en": "👑 *Legendary cat activated!* 👑\n\n🎤 Send a voice message and the Forest Spirit\nwill grant you a *Legendary cat* from the highest caste!\n\n🐱 *Mee-ow...*"},
+    "pay_sub": {"ru": "📅 *Подписка активирована!* 📅\n\nБезлимит на 30 дней. Подписка продлевается автоматически каждый месяц — отключить можно в настройках Telegram → Подписки.\n\n🌲 Спасибо, Хранитель Леса!",
+                "en": "📅 *Subscription activated!* 📅\n\nUnlimited for 30 days. Your subscription renews automatically every month — you can cancel it in Telegram settings → Subscriptions.\n\n🌲 Thank you, Forest Keeper!"},
+    "pay_sub_renew": {"ru": "📅 *Подписка продлена!* Ещё 30 дней безлимита. 🌲",
+                      "en": "📅 *Subscription renewed!* 30 more days of unlimited. 🌲"},
+    "pay_compat": {"ru": "💞 *Совместимость активирована!* 💞\n\nОтправь другу ссылку — пусть запишет голосовое:\n{{ref}}\n\nКогда друг запишет голос, Дух Леса покажет, насколько совместимы ваши коты! 🐾",
+                   "en": "💞 *Compatibility activated!* 💞\n\nSend this link to a friend — ask them to record a voice message:\n{{ref}}\n\nOnce your friend records, the Forest Spirit will reveal how compatible your cats are! 🐾"},
     "pay_donate": {"ru": "💝 *Огромное спасибо за поддержку ({{stars}} ⭐)!* 💝\n\nДух Леса чувствует твою доброту.\nБлагодаря таким путникам, как ты, Лес становится больше!\n\n🐾 *Мяу-у-у...* 🐾",
                    "en": "💝 *Thank you so much for your support ({{stars}} ⭐)!* 💝\n\nThe Forest Spirit feels your kindness.\nThanks to wanderers like you the Woods grow larger!\n\n🐾 *Mee-ow...* 🐾"},
 
     # donate
-    "donate_text": {"ru": "💝 *Поддержать Зачарованный Лес* 💝\n\nЕсли тебе нравится бот и ты хочешь помочь Лесу расти —\nвыбери сумму доната:\n\n⭐ *1 Star* — тёплое спасибо от Духа Леса\n⭐ *3 Stars* — благословение древних котов\n⭐ *5 Stars* — ты становишься Хранителем Леса 🌲",
-                    "en": "💝 *Support the Enchanted Woods* 💝\n\nIf you like the bot and want to help the Woods grow —\nchoose a donation amount:\n\n⭐ *1 Star* — a warm thanks from the Forest Spirit\n⭐ *3 Stars* — blessing of the ancient cats\n⭐ *5 Stars* — you become a Forest Keeper 🌲"},
-    "donate_short": {"ru": "💝 *Поддержать Зачарованный Лес* 💝\n\nВыбери сумму доната:\n\n⭐ *1 Star* — тёплое спасибо\n⭐ *3 Stars* — благословение древних котов\n⭐ *5 Stars* — ты Хранитель Леса 🌲",
-                     "en": "💝 *Support the Enchanted Woods* 💝\n\nChoose a donation amount:\n\n⭐ *1 Star* — a warm thanks\n⭐ *3 Stars* — blessing of ancient cats\n⭐ *5 Stars* — you are a Forest Keeper 🌲"},
+    "donate_text": {"ru": "💝 *Поддержать Зачарованный Лес* 💝\n\nЕсли тебе нравится бот и ты хочешь помочь Лесу расти —\nвыбери сумму доната:\n\n⭐ *5 Stars* — тёплое спасибо от Духа Леса\n⭐ *10 Stars* — благословение древних котов\n⭐ *25 Stars* — ты становишься Хранителем Леса 🌲",
+                    "en": "💝 *Support the Enchanted Woods* 💝\n\nIf you like the bot and want to help the Woods grow —\nchoose a donation amount:\n\n⭐ *5 Stars* — a warm thanks from the Forest Spirit\n⭐ *10 Stars* — blessing of the ancient cats\n⭐ *25 Stars* — you become a Forest Keeper 🌲"},
+    "donate_short": {"ru": "💝 *Поддержать Зачарованный Лес* 💝\n\nВыбери сумму доната:\n\n⭐ *5 Stars* — тёплое спасибо\n⭐ *10 Stars* — благословение древних котов\n⭐ *25 Stars* — ты Хранитель Леса 🌲",
+                     "en": "💝 *Support the Enchanted Woods* 💝\n\nChoose a donation amount:\n\n⭐ *5 Stars* — a warm thanks\n⭐ *10 Stars* — blessing of ancient cats\n⭐ *25 Stars* — you are a Forest Keeper 🌲"},
     "donate_invoice_title": {"ru": "💝 Донат Зачарованному Лесу", "en": "💝 Donation to the Enchanted Woods"},
     "donate_invoice_desc": {"ru": "Благодарим за поддержку! ({{stars}} ⭐)", "en": "Thank you for supporting! ({{stars}} ⭐)"},
-    "btn_donate_amt": {"ru": "💝 {{stars}} Star", "en": "💝 {{stars}} Star"},
+    "btn_donate_amt": {"ru": "💝 {{stars}} Stars", "en": "💝 {{stars}} Stars"},
     "donate_label": {"ru": "Донат {{stars}} ⭐", "en": "Donation {{stars}} ⭐"},
+
+    # compatibility
+    "compat_invite": {"ru": "🌿 *{{name}} зовёт тебя!* 🌿\n\nОн хочет узнать, насколько совместимы ваши коты.\n\n🎤 *Запиши голосовое* — и Дух Леса сравнит ваши души!",
+                      "en": "🌿 *{{name}} summons you!* 🌿\n\nThey want to know how compatible your cats are.\n\n🎤 *Record a voice message* — and the Forest Spirit will compare your souls!"},
+    "compat_self": {"ru": "❌ Это твоя ссылка! Отправь её другу.", "en": "❌ That's your own link! Send it to a friend."},
+    "compat_expired": {"ru": "🌫 Ссылка устарела... Попроси друга создать новую.", "en": "🌫 The link has expired... Ask your friend to create a new one."},
+    "compat_result": {"ru": "💞 *Совместимость раскрыта!* 💞\n\n🐱 *{{name1}}* — {{cat1}}\n🐱 *{{name2}}* — {{cat2}}\n\n📊 *Совместимость: {{score}}%*\n{{verdict}}\n\n👥 Приведи ещё друзей: {{ref}}",
+                      "en": "💞 *Compatibility revealed!* 💞\n\n🐱 *{{name1}}* — {{cat1}}\n🐱 *{{name2}}* — {{cat2}}\n\n📊 *Compatibility: {{score}}%*\n{{verdict}}\n\n👥 Bring more friends: {{ref}}"},
+    "verdict_85": {"ru": "✨ Ваши души поют в унисон! Коты из одной стаи.",
+                   "en": "✨ Your souls sing in unison! Cats of one pack."},
+    "verdict_70": {"ru": "🌟 Хорошая связь! Ваши стихии ладят.",
+                   "en": "🌟 A strong bond! Your elements get along."},
+    "verdict_50": {"ru": "🌙 Гармония требует усилий, но она возможна.",
+                   "en": "🌙 Harmony needs work, but it's within reach."},
+    "verdict_0": {"ru": "🌫 Стихии спорят. Но даже буря и покой могут ужиться.",
+                  "en": "🌫 The elements clash. But even storm and calm can coexist."},
+
+    # voice portrait (HD poster)
+    "voice_loud": {"ru": "Твой голос — раскат грома, будящий лес.", "en": "Your voice is a thunderclap that wakes the forest."},
+    "voice_med": {"ru": "Твой голос звучит уверенно, как сердце леса.", "en": "Your voice rings with confidence, like the heart of the forest."},
+    "voice_quiet": {"ru": "Твой голос — шёпот, который слышат духи.", "en": "Your voice is a whisper only spirits can hear."},
+    "pitch_high": {"ru": "Высокая нота — ты слышишь песню звёзд.", "en": "High note — you hear the song of the stars."},
+    "pitch_mid": {"ru": "Ровная середина — ты держишь равновесие миров.", "en": "Steady middle — you keep the balance of worlds."},
+    "pitch_low": {"ru": "Низкий тон — голос из глубин земли.", "en": "Low tone — a voice from the depths of the earth."},
+    "wisdom_list": {"ru": "Твой тотем — не случайность, а отражение души.\nКаждый голос хранит древнюю тайну.\nДух Леса выбрал тебя не зря.\nСлушай свой голос — он знает путь.\nТвоя стихия — часть твоего истинного «я».",
+                    "en": "Your totem is no accident — it's a mirror of your soul.\nEvery voice holds an ancient secret.\nThe Forest Spirit chose you for a reason.\nListen to your voice — it knows the way.\nYour element is part of your true self."},
+    "poster_caption": {"ru": "🖼 *HD-портрет твоего голоса* 🖼\n\n{{voice}}\n{{pitch}}\n\n{{emoji}} {{title}} — {{desc}}\n\n🌀 Стихия: *{{element}}*\n\n{{wisdom}}",
+                       "en": "🖼 *HD portrait of your voice* 🖼\n\n{{voice}}\n{{pitch}}\n\n{{emoji}} {{title}} — {{desc}}\n\n🌀 Element: *{{element}}*\n\n{{wisdom}}"},
+
+    # stats offers
+    "stats_offer_header": {"ru": "\n\n*Продажи по офферам:*\n", "en": "\n\n*Sales by offer:*\n"},
+    "stats_offer_line": {"ru": "  • {{label}}: {{cnt}} шт / {{stars}} ⭐", "en": "  • {{label}}: {{cnt}} / {{stars}} ⭐"},
 
     # give_oreshek (admin)
     "oreshek_deny": {"ru": "❌ Только Хранитель Леса.", "en": "❌ Only the Forest Keeper."},
@@ -554,6 +625,119 @@ def gen_card(cat, lang="ru", legendary=False):
     t = _text("totem_num", lang, id=str(cat['id']))
     bb = d.textbbox((0, 0), t, font=fs)
     d.text(((W - (bb[2] - bb[0])) // 2, 630), t, font=fs, fill=(150, 150, 180, 90))
+    buf = io.BytesIO(); img.save(buf, format="PNG"); return buf.getvalue()
+
+# ── HD Poster (voice portrait) ─────────────────────────────────────
+
+def _wrap_text(draw, text, font, max_w):
+    lines = []
+    cur = ""
+    for w in str(text).split():
+        t = (cur + " " + w).strip()
+        if not cur or draw.textlength(t, font=font) <= max_w:
+            cur = t
+        else:
+            lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return lines
+
+def _voice_trait_key(rms):
+    if rms >= 0.45: return "voice_loud"
+    if rms < 0.15: return "voice_quiet"
+    return "voice_med"
+
+def _pitch_trait_key(f0):
+    if f0 >= 450: return "pitch_high"
+    if f0 < 150: return "pitch_low"
+    return "pitch_mid"
+
+def _compat_verdict(score):
+    if score >= 85: return "verdict_85"
+    if score >= 70: return "verdict_70"
+    if score >= 50: return "verdict_50"
+    return "verdict_0"
+
+def _compat_score(cat_a, cat_b):
+    """0..100 from the acoustic distance between two cats' signatures."""
+    def mid(c, k):
+        return (c['acoustic']['min_' + k] + c['acoustic']['max_' + k]) / 2.0
+    drms = (mid(cat_a, "rms") - mid(cat_b, "rms")) / 0.5
+    df0 = (mid(cat_a, "f0") - mid(cat_b, "f0")) / 400.0
+    dist = math.hypot(drms, df0)
+    return max(5, min(100, round(100 - dist * 40)))
+
+def gen_poster(cat, lang="ru", rms=None, f0=None):
+    """High-res 1080x1350 poster: totem + poetic voice portrait."""
+    W, H = 1080, 1350
+    ed = EC_RU if lang == "ru" else EC_EN
+    ec = ed.get(cat['element'], (200, 200, 200))
+    bg = random.choice(BG)
+    img = Image.new("RGBA", (W, H), bg)
+    d = ImageDraw.Draw(img)
+    for _ in range(40):
+        x, y, r = random.randint(0, W), random.randint(0, H), random.randint(20, 120)
+        d.ellipse([x - r, y - r, x + r, y + r], fill=(255, 255, 255, random.randint(5, 22)))
+    for _ in range(25):
+        x, y, r = random.randint(0, W), random.randint(0, H), random.randint(3, 9)
+        c = random.choice([(240, 230, 200), (200, 220, 255), (200, 255, 220), (255, 200, 220), (220, 200, 255), (255, 220, 180)])
+        d.ellipse([x - r, y - r, x + r, y + r], fill=(c[0], c[1], c[2], random.randint(25, 70)))
+    try:
+        fp = "font.ttf" if os.path.exists("font.ttf") else os.path.join(os.path.dirname(__file__), "font.ttf")
+        ft = ImageFont.truetype(fp, 84); fn = ImageFont.truetype(fp, 54)
+        fd = ImageFont.truetype(fp, 34); fs = ImageFont.truetype(fp, 26)
+    except:
+        ft = fn = fd = fs = ImageFont.load_default()
+    d.rectangle([30, 30, W - 30, H - 30], outline=ec + (90,), width=3)
+    d.rectangle([48, 48, W - 48, H - 48], outline=ec + (45,), width=1)
+    # Name + title
+    t = f"{cat['emoji']}  {cat['name']}  {cat['emoji']}"
+    bb = d.textbbox((0, 0), t, font=ft)
+    d.text(((W - (bb[2] - bb[0])) // 2, 90), t, font=ft, fill=ec + (235,))
+    bb = d.textbbox((0, 0), cat['title'], font=fn); nw = bb[2] - bb[0]
+    d.rectangle([(W - nw) // 2 - 20, 210, (W + nw) // 2 + 20, 285], fill=bg + (190,), outline=ec + (130,), width=2)
+    d.text(((W - nw) // 2, 222), cat['title'], font=fn, fill=(255, 255, 255, 225))
+    d.line([200, 330, W - 200, 330], fill=ec + (100,), width=2)
+    # Description (wrapped)
+    yd = 380
+    for line in _wrap_text(d, cat['description'], fd, W - 200):
+        bb = d.textbbox((0, 0), line, font=fd)
+        d.text(((W - (bb[2] - bb[0])) // 2, yd), line, font=fd, fill=(200, 220, 220, 210))
+        yd += 52
+    # Element + symbol
+    t = _text("element_lbl", lang, element=cat['element'].upper())
+    bb = d.textbbox((0, 0), t, font=fs)
+    d.text(((W - (bb[2] - bb[0])) // 2, yd + 30), t, font=fs, fill=ec + (190,))
+    s = random.choice(SYMS)
+    bb = d.textbbox((0, 0), s, font=fn)
+    d.text(((W - (bb[2] - bb[0])) // 2, yd + 80), s, font=fn, fill=ec + (70,))
+    # Voice portrait lines
+    box_y = yd + 170
+    d.rectangle([120, box_y, W - 120, box_y + 380], outline=ec + (70,), width=1, fill=bg + (160,))
+    portrait = []
+    if rms is not None:
+        portrait.append(_text(_voice_trait_key(rms), lang))
+    if f0 is not None:
+        portrait.append(_text(_pitch_trait_key(f0), lang))
+    if not portrait:
+        portrait = [_text("voice_med", lang), _text("pitch_mid", lang)]
+    ty = box_y + 40
+    for line in portrait:
+        for wrapped in _wrap_text(d, line, fs, W - 240):
+            bb = d.textbbox((0, 0), wrapped, font=fs)
+            d.text(((W - (bb[2] - bb[0])) // 2, ty), wrapped, font=fs, fill=(220, 230, 240, 200))
+            ty += 44
+    # HD badge + footer
+    t = "🖼 HD PORTRAIT"
+    bb = d.textbbox((0, 0), t, font=fs)
+    d.text(((W - (bb[2] - bb[0])) // 2, H - 230), t, font=fs, fill=ec + (160,))
+    t = f"t.me/{BOT_USERNAME}"
+    bb = d.textbbox((0, 0), t, font=fs)
+    d.text(((W - (bb[2] - bb[0])) // 2, H - 170), t, font=fs, fill=(180, 180, 255, 110))
+    t = _text("totem_num", lang, id=str(cat['id']))
+    bb = d.textbbox((0, 0), t, font=fs)
+    d.text(((W - (bb[2] - bb[0])) // 2, H - 120), t, font=fs, fill=(150, 150, 180, 90))
     buf = io.BytesIO(); img.save(buf, format="PNG"); return buf.getvalue()
 
 # ── FFmpeg ─────────────────────────────────────────────────────────
@@ -900,6 +1084,25 @@ async def start(u,c):
     await record_start()
     args = c.args
 
+    # Compatibility deep link — register BEFORE the language picker so the
+    # token survives the picker round-trip
+    comp_state = None  # None | "valid" | "self" | "expired"
+    comp_name = ""
+    if args and args[0].startswith("comp_"):
+        token = args[0][5:]
+        sess = _compat_sessions.get(token)
+        if sess and (time.time() - sess["ts"]) > _COMPAT_TTL:
+            _compat_sessions.pop(token, None)
+            sess = None
+        if sess and sess["a_id"] == user_id:
+            comp_state = "self"
+        elif sess:
+            _compat_pending[user_id] = token
+            comp_state = "valid"
+            comp_name = sess.get("a_name") or ""
+        else:
+            comp_state = "expired"
+
     # check if language is already stored in DB
     stored = await _get_lang(user_id)
     if not stored:
@@ -919,28 +1122,30 @@ async def start(u,c):
     referred_by = None
     if args and args[0].startswith("ref_"):
         referrer_id = int(args[0][4:])
-        referee_id = u.effective_user.id
+        referee_id = user_id
         if referrer_id != referee_id:
             pool = await get_pool()
             async with pool.acquire() as conn:
                 existing = await conn.fetchval("SELECT 1 FROM referrals WHERE referee_id=$1", referee_id)
                 if not existing:
-                    await _add_bonus(referrer_id, 1)
-                    await conn.execute("INSERT INTO referrals(referrer_id, referee_id, ts) VALUES($1,$2,NOW())", referrer_id, referee_id)
+                    # Antifraud: bonus granted only after the friend records a real voice
+                    _pending_ref[referee_id] = referrer_id
                     try:
                         ref_chat = await c.bot.get_chat(referrer_id)
                         referred_by = ref_chat.first_name
                     except:
                         referred_by = "друг" if lang == "ru" else "someone"
-                    try:
-                        await c.bot.send_message(
-                            chat_id=referrer_id,
-                            text=_text("ref_notify", lang, name=u.effective_user.first_name),
-                            parse_mode="Markdown",
-                        )
-                    except:
-                        pass
-    if referred_by:
+    if comp_state == "valid":
+        invite_name = comp_name or referred_by or ("друг" if lang == "ru" else "a friend")
+        await u.message.reply_text(
+            _text("compat_invite", lang, name=invite_name),
+            parse_mode="Markdown"
+        )
+    elif comp_state == "self":
+        await u.message.reply_text(_text("compat_self", lang), parse_mode="Markdown")
+    elif comp_state == "expired":
+        await u.message.reply_text(_text("compat_expired", lang), parse_mode="Markdown")
+    elif referred_by:
         await u.message.reply_text(
             _text("welcome_ref", lang, name=u.effective_user.first_name, referrer=referred_by),
             parse_mode="Markdown"
@@ -957,15 +1162,15 @@ async def handle_voice(u,c):
     s=await u.message.reply_text(_text("listening", lang), parse_mode="Markdown")
     try:
         action = _pending_action.pop(user_id, None)
-        if action not in ("legendary", "reroll"):
+        compat_token = _compat_pending.pop(user_id, None)
+        if action not in ("legendary", "reroll", "poster"):
             status = await _can_read(user_id)
             if status == "limit":
-                remaining = await _get_daily_remaining(user_id)
                 await c.bot.delete_message(chat_id=u.effective_chat.id,message_id=s.message_id)
                 await u.message.reply_text(
                     _text("limit_reached", lang),
                     parse_mode="Markdown",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(_text("btn_unlimited", lang), callback_data="buy_unlimited")]])
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(_text("btn_daypass", lang), callback_data="buy_daypass")]])
                 )
                 return
             await _use_reading(user_id)
@@ -1036,6 +1241,26 @@ async def handle_voice(u,c):
         try:await record_reading(user_id,cat['id'],cat['name'],fid)
         except:pass
         _share_data[user_id] = {"file_id": fid, "cat": cat, "chat_id": u.effective_chat.id, "message_id": sent.message_id}
+        # Referral bonus: granted now — the friend really recorded a voice
+        _ref_pair = _pending_ref.pop(user_id, None)
+        if _ref_pair:
+            try:
+                await _add_bonus(_ref_pair, 1)
+                pool = await get_pool()
+                async with pool.acquire() as conn:
+                    await conn.execute("INSERT INTO referrals(referrer_id, referee_id, ts) VALUES($1,$2,NOW())", _ref_pair, user_id)
+                rl = await _get_lang(_ref_pair) or lang
+                await c.bot.send_message(
+                    chat_id=_ref_pair,
+                    text=_text("ref_notify", rl, name=u.effective_user.first_name),
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logger.warning(f"Referral bonus failed for {_ref_pair}: {e}")
+        if compat_token:
+            await _handle_compat_result(c, u, lang, user_id, compat_token, cat)
+        if action == "poster":
+            await _send_poster(c, u, lang, user_id, cat, rms, f0)
         if ob:
             prog_msg = await c.bot.send_message(chat_id=u.effective_chat.id, text=_text("preparing_video", lang), parse_mode="Markdown")
             asyncio.create_task(_send_totem_video(c, u.effective_chat.id, img_data, ob, cat, sent.message_id, user_id, lang, prog_msg.message_id))
@@ -1043,6 +1268,60 @@ async def handle_voice(u,c):
         logger.error(f"Error: {e}", exc_info=True)
         try: await c.bot.edit_message_text(_text("error_retry", lang), chat_id=u.effective_chat.id, message_id=s.message_id, parse_mode="Markdown")
         except: await u.message.reply_text(_text("error_short", lang), parse_mode="Markdown")
+
+async def _handle_compat_result(c, u, lang, user_id, token, cat_b):
+    """Friend B recorded a voice for a compatibility session — compute & notify both."""
+    sess = _compat_sessions.get(token)
+    if not sess:
+        return
+    try:
+        a_id = sess["a_id"]
+        a_cat = sess["a_cat"]
+        a_name = sess.get("a_name") or ""
+        b_name = u.effective_user.first_name or ""
+        score = _compat_score(a_cat, cat_b)
+        verdict = _text(_compat_verdict(score), lang)
+        b_ref = f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
+        b_text = _text("compat_result", lang,
+                       name1=b_name, cat1=f"{cat_b['emoji']} {cat_b['name']}",
+                       name2=a_name or "—", cat2=f"{a_cat['emoji']} {a_cat['name']}",
+                       score=str(score), verdict=verdict, ref=b_ref)
+        await u.message.reply_text(b_text, parse_mode="Markdown")
+        a_lang = sess["a_lang"]
+        a_verdict = _text(_compat_verdict(score), a_lang)
+        a_ref = f"https://t.me/{BOT_USERNAME}?start=ref_{a_id}"
+        a_text = _text("compat_result", a_lang,
+                       name1=a_name or "—", cat1=f"{a_cat['emoji']} {a_cat['name']}",
+                       name2=b_name, cat2=f"{cat_b['emoji']} {cat_b['name']}",
+                       score=str(score), verdict=a_verdict, ref=a_ref)
+        try:
+            await c.bot.send_message(chat_id=a_id, text=a_text, parse_mode="Markdown")
+        except Exception as e:
+            logger.warning(f"Compat notify to {a_id} failed: {e}")
+        _compat_sessions.pop(token, None)
+        logger.info(f"Compatibility done: {user_id} + {a_id} score={score}")
+    except Exception as e:
+        logger.error(f"Compatibility result error: {e}", exc_info=True)
+
+async def _send_poster(c, u, lang, user_id, cat, rms, f0):
+    """HD poster + poetic voice portrait (buy_poster delivery)."""
+    try:
+        img = gen_poster(cat, lang=lang, rms=rms, f0=f0)
+        voice_trait = _text(_voice_trait_key(rms), lang)
+        pitch_trait = _text(_pitch_trait_key(f0), lang)
+        wisdom = random.choice(_text("wisdom_list", lang).split("\n"))
+        caption = _text("poster_caption", lang,
+                        voice=voice_trait, pitch=pitch_trait,
+                        emoji=cat['emoji'], title=cat['title'],
+                        desc=cat['description'], element=cat['element'],
+                        wisdom=wisdom)
+        sent = await u.message.reply_photo(
+            photo=io.BytesIO(img), caption=caption, parse_mode="Markdown",
+            write_timeout=120, read_timeout=120,
+        )
+        logger.info(f"HD poster sent to user {user_id} (cat {cat['id']})")
+    except Exception as e:
+        logger.error(f"Poster error for {user_id}: {e}", exc_info=True)
 
 async def stats(u,c):
     if u.effective_user.id != ADMIN_ID:
@@ -1062,11 +1341,21 @@ async def stats(u,c):
         except: refs=0
         top_rows=await conn.fetch("SELECT cat_name, COUNT(*) as cnt FROM readings GROUP BY cat_name ORDER BY cnt DESC LIMIT 5")
         top=[(r["cat_name"], r["cnt"]) for r in top_rows]
+        try:
+            offer_rows=await conn.fetch("SELECT payload, COUNT(*) as cnt, COALESCE(SUM(stars),0) as total FROM payments GROUP BY payload ORDER BY total DESC")
+            offers=[(r["payload"], r["cnt"], r["total"]) for r in offer_rows]
+        except Exception:
+            offers=[]
     msg = _text("stats_header", lang, st=str(st), t=str(t), us=str(us), rd=str(rd), rw=str(rw), stars=str(stars), refs=str(refs))
     if top:
         msg += _text("stats_top", lang)
         for n, cnt in top:
             msg += _text("stats_line", lang, n=n, cnt=str(cnt)) + "\n"
+    if offers:
+        msg += _text("stats_offer_header", lang)
+        for payload, cnt, total in offers:
+            label = OFFER_LABELS.get(payload, payload)
+            msg += _text("stats_offer_line", lang, label=label, cnt=str(cnt), stars=str(total)) + "\n"
     msg += _text("stats_footer", lang)
     await u.message.reply_text(msg, parse_mode="Markdown")
 
@@ -1102,6 +1391,16 @@ async def language_select_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
         _text("lang_welcome_" + chosen, chosen, name=u.effective_user.first_name),
         parse_mode="Markdown"
     )
+    # User may have arrived via a compatibility link — show the invite now
+    token = _compat_pending.get(user_id)
+    if token:
+        sess = _compat_sessions.get(token)
+        if sess:
+            invite_name = sess.get("a_name") or ("друг" if chosen == "ru" else "a friend")
+            await query.message.reply_text(
+                _text("compat_invite", chosen, name=invite_name),
+                parse_mode="Markdown"
+            )
 
 async def yt_queue_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
     """Handle '📤 Отправить в YouTube' button → forward video to upload channel."""
@@ -1162,27 +1461,24 @@ async def premium(u,c):
     user_id = u.effective_user.id
     lang = await _get_user_lang(u)
     remaining = await _get_daily_remaining(user_id)
-    if remaining == float('inf'):
-        info = await _get_limit_info(user_id)
-        bonus = info["bonus_readings"] if info else 0
-        await u.message.reply_text(
-            _text("premium_unlimited", lang,
-                  ref=f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}",
-                  bonus=str(bonus)),
-            parse_mode="Markdown"
-        )
-        return
-
     info = await _get_limit_info(user_id)
     bonus = info["bonus_readings"] if info else 0
-    text = _text("premium_regular", lang,
-                 remaining=str(remaining),
-                 bonus=str(bonus),
-                 ref=f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}")
+    ref = f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
+    text = _text("premium_regular", lang, remaining=str(remaining), bonus=str(bonus), ref=ref)
+    if remaining == float('inf'):
+        until_txt = ""
+        if info and info["unlimited_until"]:
+            try:
+                until_txt = datetime.fromisoformat(info["unlimited_until"]).strftime("%d.%m %H:%M")
+            except Exception:
+                pass
+        text = _text("premium_unlimited", lang, until=until_txt) + text
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(_text("btn_buy_unlimited", lang), callback_data="buy_unlimited")],
-        [InlineKeyboardButton(_text("btn_buy_reroll", lang), callback_data="buy_reroll")],
+        [InlineKeyboardButton(_text("btn_buy_daypass", lang), callback_data="buy_daypass")],
         [InlineKeyboardButton(_text("btn_buy_legendary", lang), callback_data="buy_legendary")],
+        [InlineKeyboardButton(_text("btn_buy_poster", lang), callback_data="buy_poster")],
+        [InlineKeyboardButton(_text("btn_buy_compat", lang), callback_data="buy_compat")],
+        [InlineKeyboardButton(_text("btn_buy_sub", lang), callback_data="buy_sub")],
         [InlineKeyboardButton(_text("btn_donate", lang), callback_data="donate")],
     ])
     await u.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
@@ -1193,15 +1489,32 @@ async def buy_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
     user_id = u.effective_user.id
     lang = await _get_user_lang(u)
     payload = query.data
+    if payload == "buy_sub":
+        # Subscription: raw sendInvoice — prices must be OMITTED when subscription_period is set
+        try:
+            await c.bot._post("sendInvoice", data={
+                "chat_id": user_id,
+                "title": _text("buy_sub_title", lang),
+                "description": _text("buy_sub_desc", lang),
+                "payload": "buy_sub",
+                "currency": "XTR",
+                "start_parameter": f"{SUB_PARAM_PREFIX}_{user_id}",
+                "subscription_period": SUB_PERIOD_SECONDS,
+            })
+        except Exception as e:
+            logger.error(f"Subscription invoice error: {e}", exc_info=True)
+            await query.edit_message_text(_text("buy_error", lang))
+        return
     prices_map = {
-        "buy_unlimited": (1, "buy_unlimited_title"),
-        "buy_reroll": (2, "buy_reroll_title"),
-        "buy_legendary": (3, "buy_legendary_title"),
+        "buy_daypass": (PRICE_DAYPASS, "buy_daypass_title"),
+        "buy_legendary": (PRICE_LEGENDARY, "buy_legendary_title"),
+        "buy_poster": (PRICE_POSTER, "buy_poster_title"),
+        "buy_compat": (PRICE_COMPAT, "buy_compat_title"),
     }
     if payload not in prices_map:
         await query.edit_message_text(_text("buy_unknown", lang))
         return
-    if payload == "buy_reroll" and user_id not in _last_analysis:
+    if payload == "buy_compat" and not (_last_analysis.get(user_id) or await _get_user_cat(user_id)):
         await query.edit_message_text(_text("buy_need_totem", lang))
         return
     stars, title_key = prices_map[payload]
@@ -1225,33 +1538,57 @@ async def successful_payment_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
     lang = await _get_user_lang(u)
     payload = u.message.successful_payment.invoice_payload
     stars = u.message.successful_payment.total_amount
-    cat_pool = CATALOGUE_EN if lang == "en" else CATALOGUE_RU
     await _record_payment(user_id, payload, stars)
-    if payload == "buy_unlimited":
-        await _set_unlimited(user_id)
-        await u.message.reply_text(_text("pay_unlimited", lang), parse_mode="Markdown")
-    elif payload == "buy_reroll":
-        last = _last_analysis.get(user_id)
-        if last:
-            cat = classify_cat(last['rms'], last['f0'], exclude_ids={last['cat_id']}, pool=cat_pool)
-            _last_analysis[user_id] = {"rms": last['rms'], "f0": last['f0'], "cat_id": cat['id']}
-            img = gen_card(cat, lang=lang)
-            caption = _text("pay_reroll_caption", lang,
-                            emoji=cat['emoji'], title=cat['title'],
-                            desc=cat['description'], element=cat['element'])
-            sent = await u.message.reply_photo(photo=io.BytesIO(img), caption=caption, parse_mode="Markdown", write_timeout=120, read_timeout=120)
-            fid = sent.photo[-1].file_id
-            try: await record_reading(user_id, cat['id'], cat['name'], fid)
-            except: pass
-            _share_data[user_id] = {"file_id": fid, "voice_file_id": u.message.voice.file_id, "cat": cat, "chat_id": u.effective_chat.id, "message_id": sent.message_id}
-            await u.message.reply_text(_text("pay_reroll_done", lang), parse_mode="Markdown")
-        else:
-            await u.message.reply_text(_text("pay_reroll_fail", lang))
+    if payload == "buy_daypass":
+        await _set_unlimited(user_id, days=1)
+        await u.message.reply_text(_text("pay_daypass", lang), parse_mode="Markdown")
     elif payload == "buy_legendary":
         _pending_action[user_id] = "legendary"
         await u.message.reply_text(_text("pay_legendary", lang), parse_mode="Markdown")
+    elif payload == "buy_poster":
+        _pending_action[user_id] = "poster"
+        await u.message.reply_text(_text("pay_poster", lang), parse_mode="Markdown")
+    elif payload == "buy_sub":
+        await _set_unlimited(user_id, days=30)
+        await u.message.reply_text(_text("pay_sub", lang), parse_mode="Markdown")
+    elif payload == "buy_compat":
+        cat = await _find_cat_for_user(user_id, lang)
+        if cat is None:
+            await u.message.reply_text(_text("buy_need_totem", lang))
+            return
+        token = uuid.uuid4().hex[:10]
+        _compat_sessions[token] = {
+            "a_id": user_id, "a_lang": lang, "a_cat": cat,
+            "a_name": (u.effective_user.first_name or ""), "ts": time.time(),
+        }
+        await u.message.reply_text(
+            _text("pay_compat", lang, ref=f"https://t.me/{BOT_USERNAME}?start=comp_{token}"),
+            parse_mode="Markdown"
+        )
     elif payload == "donate":
         await u.message.reply_text(_text("pay_donate", lang, stars=str(stars)), parse_mode="Markdown")
+
+async def _find_cat_for_user(user_id, lang):
+    """Return the user's latest totem cat object (in-memory or DB), or None."""
+    pool_first = CATALOGUE_RU if lang == "ru" else CATALOGUE_EN
+    pool_second = CATALOGUE_EN if lang == "ru" else CATALOGUE_RU
+    def find(cat_id):
+        for pool in (pool_first, pool_second):
+            for cc in pool:
+                if cc['id'] == cat_id:
+                    return cc
+        return None
+    last = _last_analysis.get(user_id)
+    if last:
+        cat = find(last['cat_id'])
+        if cat:
+            return cat
+    db_cat = await _get_user_cat(user_id)
+    if db_cat:
+        cat = find(db_cat['id'])
+        if cat:
+            return cat
+    return None
 
 async def donate(u,c):
     lang = await _get_user_lang(u)
@@ -1259,9 +1596,9 @@ async def donate(u,c):
         _text("donate_text", lang),
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(_text("btn_donate_amt", lang, stars="1"), callback_data="donate_1")],
-            [InlineKeyboardButton(_text("btn_donate_amt", lang, stars="3"), callback_data="donate_3")],
             [InlineKeyboardButton(_text("btn_donate_amt", lang, stars="5"), callback_data="donate_5")],
+            [InlineKeyboardButton(_text("btn_donate_amt", lang, stars="10"), callback_data="donate_10")],
+            [InlineKeyboardButton(_text("btn_donate_amt", lang, stars="25"), callback_data="donate_25")],
         ])
     )
 
@@ -1274,9 +1611,9 @@ async def donate_show_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
         _text("donate_short", lang),
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(_text("btn_donate_amt", lang, stars="1"), callback_data="donate_1")],
-            [InlineKeyboardButton(_text("btn_donate_amt", lang, stars="3"), callback_data="donate_3")],
             [InlineKeyboardButton(_text("btn_donate_amt", lang, stars="5"), callback_data="donate_5")],
+            [InlineKeyboardButton(_text("btn_donate_amt", lang, stars="10"), callback_data="donate_10")],
+            [InlineKeyboardButton(_text("btn_donate_amt", lang, stars="25"), callback_data="donate_25")],
         ])
     )
 
@@ -1295,6 +1632,36 @@ async def donate_amount_callback(u: Update, c: ContextTypes.DEFAULT_TYPE):
         currency="XTR",
         prices=[LabeledPrice(label=_text("donate_label", lang, stars=str(stars)), amount=stars)],
     )
+
+async def recurring_payment_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    """Monthly Star-subscription renewals (arrive as recurring_payment updates)."""
+    try:
+        rp = (u.api_kwargs or {}).get("recurring_payment") or {}
+    except Exception:
+        rp = {}
+    uid = rp.get("user_id") or rp.get("chat_id")
+    if not uid:
+        logger.warning(f"recurring_payment: missing user_id in {rp}")
+        return
+    payload = rp.get("invoice_payload", "")
+    stars = rp.get("total_amount") or PRICE_SUB
+    try:
+        await _record_payment(uid, payload, int(stars))
+    except Exception as e:
+        logger.warning(f"recurring_payment: record failed: {e}")
+    if payload == "buy_sub":
+        await _set_unlimited(uid, days=30)
+        try:
+            stored = await _get_lang(uid)
+            await c.bot.send_message(chat_id=uid, text=_text("pay_sub_renew", stored or "ru"), parse_mode="Markdown")
+        except Exception as e:
+            logger.warning(f"recurring_payment: notify failed: {e}")
+    logger.info(f"recurring_payment: user={uid} payload={payload} stars={stars}")
+
+class RecurringPaymentTypeHandler(BaseHandler):
+    """Catches updates whose unknown field is `recurring_payment` (works across PTB versions)."""
+    def check_update(self, update):
+        return bool(getattr(update, "api_kwargs", None) and update.api_kwargs.get("recurring_payment"))
 
 async def save_card(u: Update, c: ContextTypes.DEFAULT_TYPE):
     query = u.callback_query
@@ -1454,6 +1821,7 @@ async def async_main():
     app.add_handler(CallbackQueryHandler(donate_amount_callback, pattern="^donate_\\d+$"))
     app.add_handler(PreCheckoutQueryHandler(pre_checkout_handler))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
+    app.add_handler(RecurringPaymentTypeHandler(recurring_payment_handler))
     app.add_handler(InlineQueryHandler(inline_query))
     await app.initialize()
     await app.start()
