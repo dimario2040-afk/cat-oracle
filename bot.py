@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8923194233:AAH4bhTZItjtrwzQ2r8sAE_3PDN5G5xBS0Y")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "Outfitnum")
 BOT_USERNAME = "catwood_bot"
 UPLOAD_CHANNEL_ID = os.environ.get("UPLOAD_CHANNEL_ID", "")
 YT_VISIBILITY = os.environ.get("YT_VISIBILITY", "public")
@@ -1323,8 +1324,25 @@ async def _send_poster(c, u, lang, user_id, cat, rms, f0):
     except Exception as e:
         logger.error(f"Poster error for {user_id}: {e}", exc_info=True)
 
+def _is_admin(update_or_user, user_id=None):
+    """Admin check by numeric ID (env) OR by Telegram @username (env ADMIN_USERNAME).
+    Accepts either (update, user_id) or (user_obj, user_id)."""
+    if user_id is None and hasattr(update_or_user, "effective_user"):
+        u = update_or_user.effective_user
+        uid = u.id if u else 0
+    else:
+        u = update_or_user
+        uid = user_id or 0
+    if uid and uid == ADMIN_ID:
+        return True
+    if u is not None:
+        uname = getattr(u, "username", None)
+        if uname and uname.lower() == ADMIN_USERNAME.lower():
+            return True
+    return False
+
 async def stats(u,c):
-    if u.effective_user.id != ADMIN_ID:
+    if not _is_admin(u):
         return await u.message.reply_text(_text("stats_deny", _guess_lang(u)))
     lang = await _get_user_lang(u)
     pool = await get_pool()
@@ -1754,7 +1772,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def give_oreshek(u,c):
     user_id = u.effective_user.id
     lang = await _get_user_lang(u)
-    if user_id != ADMIN_ID:
+    if not _is_admin(u, user_id):
         return await u.message.reply_text(_text("oreshek_deny", lang))
     cat_ru = {"id":71,"name":"Орешек","title":"Кот-Орешек",
               "description":"Снаружи твёрдая скорлупа, внутри — свет и сила.",
